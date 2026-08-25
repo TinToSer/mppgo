@@ -6,7 +6,9 @@ package mpp
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"testing"
+	"time"
 )
 
 // --- fixture builders -------------------------------------------------
@@ -21,6 +23,12 @@ func u32(v int) []byte {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, uint32(v))
 	return b
+}
+
+// putFloat64 writes an IEEE-754 double at the start of buf, for building
+// the work/cost/units fields those decoders read.
+func putFloat64(buf []byte, v float64) {
+	binary.LittleEndian.PutUint64(buf, math.Float64bits(v))
 }
 
 // buildFixedMeta produces a FixedMeta stream whose records carry the given
@@ -296,6 +304,27 @@ func TestParseProps14Truncated(t *testing.T) {
 
 	if p := ParseProps14(nil); p.Int(1) != 0 {
 		t.Error("parsing nil should yield an empty Props")
+	}
+}
+
+func TestPropsTimestamp(t *testing.T) {
+	// time=480 (units of 6s => 48 min), days=15000 — same fixture as
+	// TestGetTimestamp in util_test.go, since Props.Timestamp is a thin
+	// wrapper around the same decoder.
+	props := ParseProps14(buildProps14(
+		[2]interface{}{1, []byte{0xE0, 0x01, 0x98, 0x3A}},
+	))
+	got, ok := props.Timestamp(1)
+	if !ok {
+		t.Fatal("Timestamp reported not-ok for a valid value")
+	}
+	want := epoch.AddDate(0, 0, 15000).Add(48 * time.Minute)
+	if !got.Equal(want) {
+		t.Errorf("Timestamp = %v, want %v", got, want)
+	}
+
+	if _, ok := props.Timestamp(999); ok {
+		t.Error("Timestamp for an absent key should report not-ok")
 	}
 }
 

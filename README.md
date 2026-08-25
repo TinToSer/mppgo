@@ -15,9 +15,12 @@ against a real Project 2016/365 file; entity readers are being built on top.
 | --- | --- |
 | CFB / OLE2 container | Complete |
 | MPP14 binary primitives | Complete |
-| Project properties | Partial — file path, default calendar, application version |
+| Project properties | Partial — file path, calendar, version, start/finish/status dates, scheduling factors |
 | Calendars | Complete — working weeks, hours, exceptions, inheritance |
-| Tasks / Resources / Assignments | Not yet implemented |
+| Tasks | Partial — hierarchy, WBS, early/late/actual dates, duration, work, cost, constraint, priority, flags |
+| Resources | Partial — name, initials, type, group, rate, max units, work, cost, calendar |
+| Assignments | Partial — task/resource links, units, work |
+| Task dependencies | Complete — predecessors/successors, relation type, lag |
 | Custom fields / baselines | Not yet implemented |
 | MSPDI (XML) read/write | Not yet implemented |
 | MPP write | Not yet implemented |
@@ -50,6 +53,27 @@ christmas := time.Date(2025, 12, 25, 0, 0, 0, 0, time.UTC)
 fmt.Println(pf.DefaultCalendar.WorkingOn(christmas)) // false
 ```
 
+Tasks come back in ID order — the row order MS Project displays — with the
+outline hierarchy, schedule dates and dependencies resolved:
+
+```go
+for _, t := range pf.Tasks {
+    if t.Summary || t.Inactive {
+        continue
+    }
+    fmt.Printf("%s %s  %.1f%s  %s..%s\n",
+        t.WBS, t.Name,
+        t.Duration.Amount, t.Duration.Units,
+        t.Start.Format("2006-01-02"), t.Finish.Format("2006-01-02"))
+
+    for _, r := range t.Predecessors {
+        pred := pf.TaskByID(r.PredecessorUniqueID)
+        fmt.Printf("    after %q (%s, lag %.1f%s)\n",
+            pred.Name, r.Type, r.Lag.Amount, r.Lag.Units)
+    }
+}
+```
+
 Password-protected files return `mpp.ErrPasswordProtected`; non-MPP14 files
 return `mpp.ErrUnsupportedFormat`.
 
@@ -61,6 +85,7 @@ return `mpp.ErrUnsupportedFormat`.
 - `project` — format-agnostic data model that readers and writers target.
 - `cmd/inspect` — dump a compound file's storage/stream tree.
 - `cmd/dumpcalendars` — dump a plan's properties and calendars.
+- `cmd/dumptasks` — dump a plan's task hierarchy, dates and dependencies.
 
 ## Calendars
 
@@ -104,6 +129,32 @@ return errors, never panic or exhaust memory.
   corrupts every date field, so `getShort` is unsigned by definition.
 - **No trusted lengths.** Counts and sizes from the file are validated
   against the actual file length before being used to size allocations.
+- **Field offsets come from the file, not just from defaults.** Unlike
+  calendars, task/resource/assignment fields sit at byte offsets MS Project
+  records in a per-file field map (a Props value) rather than at fixed
+  positions — real files, especially ones from a continuously-updated
+  Microsoft 365 build, can and do shift these relative to older reference
+  layouts. This reader parses that field map when present and only falls
+  back to the MPP14 defaults when it is absent.
+- **WBS is synthesized when the file doesn't store one.** MS Project only
+  persists a task's WBS when a user customizes it; otherwise it's
+  auto-numbered from the outline structure and never written to the file.
+  `Task.WBS` reproduces that auto-numbering (outline position, MS Project's
+  own algorithm) rather than leaving it blank, since a blank WBS would
+  otherwise be the common case, not the exception.
+- **Inactive tasks keep their late dates but lose their current ones.** A
+  task explicitly deactivated in MS Project (Project 2010+) has its
+  Start/Finish cleared to "not applicable" while LateStart/LateFinish keep
+  whatever they were before deactivation. `Task.Inactive` distinguishes this
+  from genuinely missing data.
+- **`Task.Start`/`Finish` are stored only for active leaf tasks.** Summary
+  tasks carry no stored start or finish — MS Project rolls those up from
+  the children on display — so those fields are zero for them.
+  `EarlyStart`/`EarlyFinish` are populated for every task and are the ones
+  to reach for when a summary row needs a date.
+- **Units are percentages, not fractions.** `Assignment.Units` and
+  `Resource.MaxUnits` report 100 for a full-time 100%, matching MS Project
+  and MPXJ rather than normalising to 1.0.
 
 ## License
 

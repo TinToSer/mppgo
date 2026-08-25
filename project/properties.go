@@ -20,7 +20,22 @@ type Properties struct {
 	StartDate  time.Time
 	FinishDate time.Time
 
+	// StatusDate is the single project-level date MS Project's own status
+	// reporting places the current schedule snapshot against — it is not
+	// derivable from any task field. Zero if the project has none set.
+	StatusDate time.Time
+
 	DefaultCalendarName string
+
+	// MinutesPerDay, MinutesPerWeek and DaysPerMonth are the conversion
+	// factors MS Project uses to turn a stored duration into the day/week/
+	// month figure it displays. They are project settings, not derived from
+	// the calendar, and a file that sets "8 hours = 1 day" reports a
+	// different number of days for the same stored duration than one that
+	// sets 12. Zero if the file did not record them.
+	MinutesPerDay  int
+	MinutesPerWeek int
+	DaysPerMonth   int
 
 	// ApplicationName and ApplicationVersion identify the MS Project build
 	// that wrote the file (e.g. "Microsoft.Project 16.0", 16). The version

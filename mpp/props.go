@@ -3,6 +3,8 @@
 
 package mpp
 
+import "time"
+
 // Props is a decoded "Props"/"Props14" property-set stream: an integer key
 // to raw-byte-value map, with typed accessors.
 type Props struct {
@@ -86,6 +88,14 @@ func (p *Props) UnicodeString(key int) string {
 		return ""
 	}
 	return getUnicodeString(v, 0)
+}
+
+// Timestamp decodes a property as a date and time, reporting ok=false when
+// the field holds the "no value" encoding. Matches MPXJ's
+// Props.getTimestamp, which is MPPUtility.getTimestamp(item, 0) — the same
+// 2-byte-time/2-byte-day-count layout used throughout fixed-data records.
+func (p *Props) Timestamp(key int) (time.Time, bool) {
+	return getTimestamp(p.values[key], 0)
 }
 
 func (p *Props) Boolean(key int) bool {

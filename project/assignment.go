@@ -10,6 +10,9 @@ type Assignment struct {
 	TaskUniqueID     int
 	ResourceUniqueID int
 
-	Units float64 // e.g. 1.0 = 100%
-	Work  Duration
+	// Units is the proportion of the resource assigned, as a percentage:
+	// 100 means 100%, matching how MS Project and MPXJ report it.
+	Units float64
+
+	Work Duration
 }

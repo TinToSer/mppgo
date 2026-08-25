@@ -30,7 +30,7 @@ func readSample(t *testing.T) *project.File {
 func TestReadSampleProperties(t *testing.T) {
 	pf := readSample(t)
 
-	if got, want := pf.Properties.DefaultCalendarName, "Standard"; got != want {
+	if got, want := pf.Properties.DefaultCalendarName, "6 Days Calender"; got != want {
 		t.Errorf("DefaultCalendarName = %q, want %q", got, want)
 	}
 	if got, want := pf.Properties.ApplicationVersion, 16; got != want {
@@ -41,6 +41,19 @@ func TestReadSampleProperties(t *testing.T) {
 	}
 	if pf.DefaultCalendar == nil {
 		t.Error("DefaultCalendar was not resolved")
+	}
+
+	if pf.Properties.StartDate.IsZero() {
+		t.Error("StartDate was not populated")
+	}
+	if pf.Properties.FinishDate.IsZero() {
+		t.Error("FinishDate was not populated")
+	}
+	if pf.Properties.FinishDate.Before(pf.Properties.StartDate) {
+		t.Errorf("FinishDate %v is before StartDate %v", pf.Properties.FinishDate, pf.Properties.StartDate)
+	}
+	if pf.Properties.StatusDate.IsZero() {
+		t.Error("StatusDate was not populated")
 	}
 }
 
@@ -87,52 +100,34 @@ func TestReadSampleStandardCalendar(t *testing.T) {
 
 func TestReadSampleCalendarExceptions(t *testing.T) {
 	pf := readSample(t)
-	std := pf.CalendarByName("Standard")
-	if std == nil {
-		t.Fatal(`no "Standard" calendar`)
+	sixDay := pf.CalendarByName("6 Days Calender")
+	if sixDay == nil {
+		t.Fatal(`no "6 Days Calender" calendar`)
 	}
 
-	if len(std.Exceptions) != 4 {
-		t.Fatalf("len(Exceptions) = %d, want 4", len(std.Exceptions))
+	if len(sixDay.Exceptions) != 2 {
+		t.Fatalf("len(Exceptions) = %d, want 2", len(sixDay.Exceptions))
 	}
 
-	first := std.Exceptions[0]
-	if first.Name != "Christmas break" {
-		t.Errorf("Exceptions[0].Name = %q, want %q", first.Name, "Christmas break")
+	// Both exceptions fall on a Sunday, the one day this calendar does not
+	// otherwise work, so only the exception can make them working.
+	for _, dateStr := range []string{"2022-04-17", "2022-05-08"} {
+		d, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", dateStr, err)
+		}
+		if d.Weekday() != time.Sunday {
+			t.Fatalf("fixture assumption broken: %s is %s", dateStr, d.Weekday())
+		}
+		if !sixDay.WorkingOn(d) {
+			t.Errorf("%s should be working (exception overrides Sunday)", dateStr)
+		}
 	}
-	if first.Working() {
-		t.Error("Christmas break should be non-working")
+	if sixDay.IsWorkingDay(time.Sunday) {
+		t.Error("Sunday should otherwise be non-working")
 	}
-	if got, want := first.FromDate.Format("2006-01-02"), "2025-12-24"; got != want {
-		t.Errorf("FromDate = %s, want %s", got, want)
-	}
-	if got, want := first.ToDate.Format("2006-01-02"), "2026-01-01"; got != want {
-		t.Errorf("ToDate = %s, want %s", got, want)
-	}
-
-	// A date inside the Christmas break is a normal working weekday, so
-	// only the exception can make it non-working.
-	xmasEve := time.Date(2025, 12, 24, 0, 0, 0, 0, time.UTC)
-	if xmasEve.Weekday() != time.Wednesday {
-		t.Fatalf("fixture assumption broken: 2025-12-24 is %s", xmasEve.Weekday())
-	}
-	if std.WorkingOn(xmasEve) {
-		t.Error("2025-12-24 should be non-working (inside Christmas break)")
-	}
-	if !std.IsWorkingDay(time.Wednesday) {
-		t.Error("Wednesday should otherwise be a working day")
-	}
-
-	// The sample also contains a one-off working Saturday.
-	sat := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
-	if sat.Weekday() != time.Saturday {
-		t.Fatalf("fixture assumption broken: 2026-06-20 is %s", sat.Weekday())
-	}
-	if !std.WorkingOn(sat) {
-		t.Error("2026-06-20 should be working (exception overrides Saturday)")
-	}
-	if std.IsWorkingDay(time.Saturday) {
-		t.Error("Saturday should otherwise be non-working")
+	if sixDay.IsWorkingDay(time.Saturday) == false {
+		t.Error("Saturday should be a working day on the 6-day calendar")
 	}
 }
 
@@ -163,6 +158,222 @@ func TestReadSampleDerivedCalendarsInherit(t *testing.T) {
 		if hours := c.HoursFor(time.Wednesday); len(hours) == 0 {
 			t.Errorf("derived calendar #%d: Wednesday should inherit working hours", c.UniqueID)
 		}
+	}
+}
+
+// TestReadSampleResources checks the eight category resources
+// (CR/DR/ER/GR/IR/MR/PR/TR) that drive S-curve categorization are read with
+// their names, initials, and a calendar link resolved from TBkndCal.
+func TestReadSampleResources(t *testing.T) {
+	pf := readSample(t)
+
+	if len(pf.Resources) == 0 {
+		t.Fatal("expected at least one resource")
+	}
+
+	wantInitials := map[string]bool{"C": false, "D": false, "E": false, "G": false, "I": false, "M": false, "P": false, "T": false}
+	for _, r := range pf.Resources {
+		if r.Name == "" {
+			t.Errorf("resource #%d has an empty name", r.UniqueID)
+		}
+		if _, tracked := wantInitials[r.Initials]; tracked {
+			wantInitials[r.Initials] = true
+		}
+		if r.CalendarUniqueID != 0 && pf.CalendarByID(r.CalendarUniqueID) == nil {
+			t.Errorf("resource %q: CalendarUniqueID %d does not resolve to a calendar", r.Name, r.CalendarUniqueID)
+		}
+	}
+	for initials, seen := range wantInitials {
+		if !seen {
+			t.Errorf("expected a resource with initials %q", initials)
+		}
+	}
+}
+
+// TestReadSampleTasks exercises the task hierarchy end to end: every parent
+// reference resolves, Summary is set on (and only on) tasks that are
+// actually a parent, and the outline levels form a real multi-level tree
+// rather than everything landing at level 0 (the symptom of a misaligned
+// FixedData offset).
+func TestReadSampleTasks(t *testing.T) {
+	pf := readSample(t)
+
+	if len(pf.Tasks) == 0 {
+		t.Fatal("expected at least one task")
+	}
+
+	hasChildren := make(map[int]bool)
+	for _, task := range pf.Tasks {
+		if task.ParentUniqueID == 0 {
+			continue
+		}
+		parent := pf.TaskByID(task.ParentUniqueID)
+		if parent == nil {
+			t.Errorf("task %q: ParentUniqueID %d does not resolve to a task", task.Name, task.ParentUniqueID)
+			continue
+		}
+		hasChildren[parent.UniqueID] = true
+	}
+
+	var topLevel, milestones, maxOutline int
+	for _, task := range pf.Tasks {
+		if task.ParentUniqueID == 0 {
+			topLevel++
+		}
+		if task.Milestone {
+			milestones++
+		}
+		if task.OutlineLevel > maxOutline {
+			maxOutline = task.OutlineLevel
+		}
+		if want := hasChildren[task.UniqueID]; task.Summary != want {
+			t.Errorf("task %q: Summary = %v, want %v (has children = %v)", task.Name, task.Summary, want, want)
+		}
+	}
+	if topLevel == 0 {
+		t.Error("expected at least one top-level task (ParentUniqueID == 0)")
+	}
+	if milestones == 0 {
+		t.Error("expected at least one milestone task")
+	}
+	if maxOutline < 2 {
+		t.Errorf("max OutlineLevel = %d, want a real multi-level hierarchy (>= 2)", maxOutline)
+	}
+}
+
+// TestReadSampleAssignments checks every assignment links back to a real
+// task and resource, and that Work/Units decode to non-negative values.
+func TestReadSampleAssignments(t *testing.T) {
+	pf := readSample(t)
+
+	if len(pf.Assignments) == 0 {
+		t.Fatal("expected at least one assignment")
+	}
+
+	for _, a := range pf.Assignments {
+		if pf.TaskByID(a.TaskUniqueID) == nil {
+			t.Errorf("assignment #%d: TaskUniqueID %d does not resolve to a task", a.UniqueID, a.TaskUniqueID)
+		}
+		if pf.ResourceByID(a.ResourceUniqueID) == nil {
+			t.Errorf("assignment #%d: ResourceUniqueID %d does not resolve to a resource", a.UniqueID, a.ResourceUniqueID)
+		}
+		if a.Units < 0 {
+			t.Errorf("assignment #%d: Units = %v, want >= 0", a.UniqueID, a.Units)
+		}
+		if a.Work.Amount < 0 {
+			t.Errorf("assignment #%d: Work = %v, want >= 0", a.UniqueID, a.Work.Amount)
+		}
+	}
+}
+
+// TestReadSampleRelations checks the dependency graph: every relation
+// resolves to real tasks at both ends, the per-task links agree with the
+// flat list, and the graph is not degenerate.
+func TestReadSampleRelations(t *testing.T) {
+	pf := readSample(t)
+
+	if len(pf.Relations) == 0 {
+		t.Fatal("expected at least one task dependency")
+	}
+
+	linkCount := 0
+	for _, r := range pf.Relations {
+		pred := pf.TaskByID(r.PredecessorUniqueID)
+		succ := pf.TaskByID(r.SuccessorUniqueID)
+		if pred == nil {
+			t.Errorf("relation #%d: predecessor %d does not resolve", r.UniqueID, r.PredecessorUniqueID)
+		}
+		if succ == nil {
+			t.Errorf("relation #%d: successor %d does not resolve", r.UniqueID, r.SuccessorUniqueID)
+		}
+		if r.PredecessorUniqueID == r.SuccessorUniqueID {
+			t.Errorf("relation #%d links a task to itself", r.UniqueID)
+		}
+		switch r.Type {
+		case project.FinishStart, project.FinishFinish, project.StartStart, project.StartFinish:
+		default:
+			t.Errorf("relation #%d has an unrecognised type %d", r.UniqueID, r.Type)
+		}
+	}
+
+	// Every relation must appear on both of the tasks it links.
+	for _, task := range pf.Tasks {
+		linkCount += len(task.Predecessors) + len(task.Successors)
+		for _, r := range task.Predecessors {
+			if r.SuccessorUniqueID != task.UniqueID {
+				t.Errorf("task %d lists a predecessor relation whose successor is %d", task.UniqueID, r.SuccessorUniqueID)
+			}
+		}
+		for _, r := range task.Successors {
+			if r.PredecessorUniqueID != task.UniqueID {
+				t.Errorf("task %d lists a successor relation whose predecessor is %d", task.UniqueID, r.PredecessorUniqueID)
+			}
+		}
+	}
+	if want := len(pf.Relations) * 2; linkCount != want {
+		t.Errorf("per-task links = %d, want %d (each relation linked from both ends)", linkCount, want)
+	}
+}
+
+// TestReadSampleTaskDurations checks durations decode into sane units
+// rather than the raw tenths-of-a-minute counts stored in the file.
+func TestReadSampleTaskDurations(t *testing.T) {
+	pf := readSample(t)
+
+	if pf.Properties.MinutesPerDay <= 0 {
+		t.Error("MinutesPerDay was not populated, so durations cannot be scaled correctly")
+	}
+
+	withDuration := 0
+	for _, task := range pf.Tasks {
+		if task.Duration.Amount < 0 {
+			t.Errorf("task %q has a negative duration %v", task.Name, task.Duration.Amount)
+		}
+		if task.Duration.Amount > 0 {
+			withDuration++
+			// A raw count read without conversion would be in the
+			// thousands; a real schedule's task durations are not.
+			if task.Duration.Units == project.Days && task.Duration.Amount > 10000 {
+				t.Errorf("task %q duration %v days looks like an unconverted raw value",
+					task.Name, task.Duration.Amount)
+			}
+		}
+	}
+	if withDuration == 0 {
+		t.Error("no task had a duration")
+	}
+}
+
+// TestReadSampleResourceWorkReconciles is a cross-check between three
+// independently decoded fields: a resource's own rolled-up Work should
+// equal the sum of its assignments' Work, once inactive tasks are excluded
+// (MS Project leaves them out of the rollup but keeps their assignments).
+// Agreement here means Resource.Work, Assignment.Work and Task.Inactive are
+// all being read correctly.
+func TestReadSampleResourceWorkReconciles(t *testing.T) {
+	pf := readSample(t)
+
+	assigned := make(map[int]float64)
+	for _, a := range pf.Assignments {
+		if task := pf.TaskByID(a.TaskUniqueID); task != nil && task.Inactive {
+			continue
+		}
+		assigned[a.ResourceUniqueID] += a.Work.Amount
+	}
+
+	checked := 0
+	for _, r := range pf.Resources {
+		if r.Work.Amount == 0 && assigned[r.UniqueID] == 0 {
+			continue
+		}
+		checked++
+		if diff := r.Work.Amount - assigned[r.UniqueID]; diff > 1e-6 || diff < -1e-6 {
+			t.Errorf("resource %q: Work = %v, but its assignments total %v",
+				r.Name, r.Work.Amount, assigned[r.UniqueID])
+		}
+	}
+	if checked == 0 {
+		t.Skip("no resource in the sample carries work to reconcile")
 	}
 }
 

@@ -27,6 +27,19 @@ const (
 	propsProjectFilePath        = 893386760
 )
 
+// Props keys for the per-project Props stream (projectDirPath + "/Props").
+// propsDefaultCalendarName/propsDefaultCalendarHours live in calendar.go
+// alongside the code that uses them.
+const (
+	propsProjectStartDate  = 37748738
+	propsProjectFinishDate = 37748739
+	propsStatusDate        = 37748805
+	propsMinutesPerDay     = 37748765
+	propsMinutesPerWeek    = 37748766
+	propsDaysPerMonth      = 37753743
+	propsDurationUnits     = 37748757
+)
+
 // MS Project application versions, as reported by the CompObj stream.
 const (
 	appVersionProject2010 = 14
@@ -64,9 +77,6 @@ func ReadFile(path string) (*project.File, error) {
 
 // Read parses an MPP14 file. The reader must expose the whole file; an
 // *os.File or a bytes.Reader both satisfy this.
-//
-// Currently populated on the returned project.File: Properties (partial)
-// and Calendars. Tasks, Resources and Assignments are not yet implemented.
 func Read(r io.ReaderAt) (*project.File, error) {
 	cf, err := cfb.Open(r)
 	if err != nil {
@@ -110,6 +120,24 @@ func Read(r io.ReaderAt) (*project.File, error) {
 	pf.Properties.DefaultCalendarName = projectProps.UnicodeString(propsDefaultCalendarName)
 	pf.Properties.ApplicationVersion = compObj.ApplicationVersion
 	pf.Properties.ApplicationName = compObj.ApplicationName
+	if d, ok := projectProps.Timestamp(propsProjectStartDate); ok {
+		pf.Properties.StartDate = d
+	}
+	if d, ok := projectProps.Timestamp(propsProjectFinishDate); ok {
+		pf.Properties.FinishDate = d
+	}
+	if d, ok := projectProps.Timestamp(propsStatusDate); ok {
+		pf.Properties.StatusDate = d
+	}
+	pf.Properties.MinutesPerDay = projectProps.Int(propsMinutesPerDay)
+	pf.Properties.MinutesPerWeek = projectProps.Int(propsMinutesPerWeek)
+	pf.Properties.DaysPerMonth = projectProps.Short(propsDaysPerMonth)
+
+	// Durations are stored as a raw count plus a units code; converting one
+	// into the days/weeks/months figure MS Project displays depends on the
+	// project settings read just above.
+	scale := newDurationScale(pf.Properties)
+	defaultDurationUnits := durationTimeUnits(projectProps.Short(propsDurationUnits), project.Days)
 
 	calendars, resourceCalendars, err := readCalendars(src, projectDirPath, projectProps, compObj.ApplicationVersion)
 	if err != nil {
@@ -122,6 +150,43 @@ func Read(r io.ReaderAt) (*project.File, error) {
 
 	if cal := pf.CalendarByName(pf.Properties.DefaultCalendarName); cal != nil {
 		pf.DefaultCalendar = cal
+	}
+
+	resources, err := readResources(src, projectDirPath, projectProps, compObj.ApplicationVersion)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range resources {
+		if cal, ok := pf.ResourceCalendars[r.UniqueID]; ok {
+			r.CalendarUniqueID = cal.UniqueID
+		}
+		pf.AddResource(r)
+	}
+
+	tasks, err := readTasks(src, projectDirPath, projectProps, compObj.ApplicationVersion, scale, defaultDurationUnits)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tasks {
+		pf.AddTask(t)
+	}
+
+	// Relations are read after tasks so each one can be linked to the tasks
+	// it names as it is added.
+	relations, err := readRelations(src, projectDirPath, compObj.ApplicationVersion, scale, defaultDurationUnits)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range relations {
+		pf.AddRelation(r)
+	}
+
+	assignments, err := readAssignments(src, projectDirPath, projectProps)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range assignments {
+		pf.AddAssignment(a)
 	}
 
 	return pf, nil

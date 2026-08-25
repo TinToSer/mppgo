@@ -15,6 +15,10 @@ type File struct {
 	Resources   []*Resource
 	Assignments []*Assignment
 
+	// Relations holds every task dependency in the file. The same values
+	// are also reachable per-task through Task.Predecessors/Successors.
+	Relations []*Relation
+
 	// DefaultCalendar is the project's default calendar, if it could be
 	// identified.
 	DefaultCalendar *Calendar
@@ -69,6 +73,20 @@ func (f *File) AddAssignment(a *Assignment) {
 	f.Assignments = append(f.Assignments, a)
 }
 
+// AddRelation registers a task dependency, linking it into both the
+// predecessor's and the successor's lists. Ends that do not resolve to a
+// known task are skipped, so a relation referencing a task that was never
+// read still lands in File.Relations but does not create a dangling link.
+func (f *File) AddRelation(r *Relation) {
+	f.Relations = append(f.Relations, r)
+	if pred := f.TaskByID(r.PredecessorUniqueID); pred != nil {
+		pred.Successors = append(pred.Successors, r)
+	}
+	if succ := f.TaskByID(r.SuccessorUniqueID); succ != nil {
+		succ.Predecessors = append(succ.Predecessors, r)
+	}
+}
+
 // CalendarByID looks up a calendar by its unique ID.
 func (f *File) CalendarByID(id int) *Calendar { return f.calendarsByID[id] }
 
@@ -90,6 +108,19 @@ func (f *File) CalendarByName(name string) *Calendar {
 		}
 	}
 	return nil
+}
+
+// TaskCalendar resolves a task's effective calendar: the task's own
+// calendar if it has one, otherwise the project default. Mirrors MPXJ's
+// Task.getEffectiveCalendar(), scoped down to the two sources this reader
+// populates.
+func (f *File) TaskCalendar(t *Task) *Calendar {
+	if t.CalendarUniqueID != 0 {
+		if c := f.CalendarByID(t.CalendarUniqueID); c != nil {
+			return c
+		}
+	}
+	return f.DefaultCalendar
 }
 
 // BaseCalendars returns the calendars that are not derived from another —
