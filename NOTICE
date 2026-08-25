@@ -1,0 +1,26 @@
+mppgo
+=====
+
+This library reads Microsoft Project files in Go.
+
+The MPP file format is proprietary and undocumented. Microsoft has never
+published a specification for it. Everything this library knows about the
+binary layout of an MPP file — the meaning of the FixedMeta/FixedData and
+VarMeta/Var2Data block structures, the Props key values, the calendar data
+encoding, the date/time epoch, and the stream obfuscation scheme — derives
+from the reverse engineering work of the MPXJ project:
+
+    MPXJ - https://github.com/joniles/mpxj
+    Copyright (c) Packwood Software
+    Licensed under the GNU Lesser General Public License v2.1 or later
+
+MPXJ's Java source was read as the reference for understanding the format.
+No MPXJ source code was copied into this project; the Go implementation here
+was written independently against that understanding. Nonetheless, the
+format knowledge that makes this library possible is MPXJ's contribution,
+and that debt is acknowledged here explicitly.
+
+If you need broad, production-grade Microsoft Project support today —
+including MPP8/9/12, Primavera, Asta, Planner and many other formats — use
+MPXJ. It is mature, actively maintained, and available for Java, .NET,
+Python and Ruby.

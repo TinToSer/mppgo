@@ -1,0 +1,2 @@
+# Real MPP fixtures carry project-specific data and must never be committed.
+*.mpp
