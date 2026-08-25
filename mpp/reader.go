@@ -38,6 +38,19 @@ const (
 	propsMinutesPerWeek    = 37748766
 	propsDaysPerMonth      = 37753743
 	propsDurationUnits     = 37748757
+
+	// Document metadata. MS Project writes these here as well as into the
+	// standard OLE "\x05SummaryInformation" property set; this reader uses
+	// the copy in Props, so a value MS Project left only in the OLE
+	// property set is not picked up.
+	propsTitle    = 37748744
+	propsSubject  = 37748745
+	propsAuthor   = 37748748
+	propsKeywords = 37748749
+	propsComments = 37748741
+	propsCompany  = 37748736
+	propsManager  = 37748737
+	propsCategory = 37748809
 )
 
 // MS Project application versions, as reported by the CompObj stream.
@@ -129,6 +142,14 @@ func Read(r io.ReaderAt) (*project.File, error) {
 	if d, ok := projectProps.Timestamp(propsStatusDate); ok {
 		pf.Properties.StatusDate = d
 	}
+	pf.Properties.Name = projectProps.UnicodeString(propsTitle)
+	pf.Properties.Subject = projectProps.UnicodeString(propsSubject)
+	pf.Properties.Author = projectProps.UnicodeString(propsAuthor)
+	pf.Properties.Keywords = projectProps.UnicodeString(propsKeywords)
+	pf.Properties.Comments = projectProps.UnicodeString(propsComments)
+	pf.Properties.Company = projectProps.UnicodeString(propsCompany)
+	pf.Properties.Manager = projectProps.UnicodeString(propsManager)
+	pf.Properties.Category = projectProps.UnicodeString(propsCategory)
 	pf.Properties.MinutesPerDay = projectProps.Int(propsMinutesPerDay)
 	pf.Properties.MinutesPerWeek = projectProps.Int(propsMinutesPerWeek)
 	pf.Properties.DaysPerMonth = projectProps.Short(propsDaysPerMonth)

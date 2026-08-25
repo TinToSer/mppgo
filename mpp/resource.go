@@ -115,17 +115,14 @@ func readResources(src *streamSource, projectDirPath string, projectProps *Props
 	offStandardRate := off(resourceFieldIDStandardRate, resourceDefaultOffsetStandardRate)
 	offWork := off(resourceFieldIDWork, resourceDefaultOffsetWork)
 	offCost := off(resourceFieldIDCost, resourceDefaultOffsetCost)
-	// A record must be long enough to hold every field read below;
-	// admitting a shorter one would yield a half-populated resource whose
-	// missing fields silently read as zero.
-	minSize := 0
-	for _, end := range []int{
-		offUniqueID + 4, offID + 4, offMaxUnits + 8,
-		offStandardRate + 8, offWork + 8, offCost + 8,
-	} {
-		if end > minSize {
-			minSize = end
-		}
+	// A record only has to be long enough to identify the resource. The
+	// optional fields below are read through bounds-safe accessors, so a
+	// short record yields a resource with those left at zero rather than
+	// being dropped entirely — losing a real resource is the worse
+	// outcome, and matches this reader's degrade-don't-fail stance.
+	minSize := offUniqueID + 4
+	if offID+4 > minSize {
+		minSize = offID + 4
 	}
 
 	seen := make(map[int]bool)

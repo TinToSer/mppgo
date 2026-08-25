@@ -8,20 +8,23 @@ reverse engineered the undocumented MPP binary format. See [NOTICE](NOTICE).
 
 ## Status
 
-Early. The container and binary-primitive layers are complete and verified
-against a real Project 2016/365 file; entity readers are being built on top.
+Reads the core schedule — tasks, resources, assignments, dependencies and
+calendars — verified against a real Project 2016/365 file. Custom fields,
+baselines and writing are not implemented.
 
 | Area | State |
 | --- | --- |
 | CFB / OLE2 container | Complete |
 | MPP14 binary primitives | Complete |
-| Project properties | Partial — file path, calendar, version, start/finish/status dates, scheduling factors |
+| Project properties | Partial — title/metadata, file path, calendar, version, start/finish/status dates, scheduling factors |
 | Calendars | Complete — working weeks, hours, exceptions, inheritance |
-| Tasks | Partial — hierarchy, WBS, early/late/actual dates, duration, work, cost, constraint, priority, flags |
-| Resources | Partial — name, initials, type, group, rate, max units, work, cost, calendar |
+| Tasks | Core fields — hierarchy, WBS, all four date pairs, duration, slack, work, cost, constraint, type, flags |
+| Resources | Core fields — name, initials, type, group, rate, max units, work, cost, calendar |
 | Assignments | Partial — task/resource links, units, work |
 | Task dependencies | Complete — predecessors/successors, relation type, lag |
+| Task/resource notes | Not yet implemented (stored as RTF) |
 | Custom fields / baselines | Not yet implemented |
+| Timephased data | Not yet implemented |
 | MSPDI (XML) read/write | Not yet implemented |
 | MPP write | Not yet implemented |
 
@@ -66,6 +69,8 @@ for _, t := range pf.Tasks {
         t.Duration.Amount, t.Duration.Units,
         t.Start.Format("2006-01-02"), t.Finish.Format("2006-01-02"))
 
+    // Both ends of a relation reached this way always resolve, so no
+    // nil check is needed here.
     for _, r := range t.Predecessors {
         pred := pf.TaskByID(r.PredecessorUniqueID)
         fmt.Printf("    after %q (%s, lag %.1f%s)\n",
@@ -155,6 +160,16 @@ return errors, never panic or exhaust memory.
 - **Units are percentages, not fractions.** `Assignment.Units` and
   `Resource.MaxUnits` report 100 for a full-time 100%, matching MS Project
   and MPXJ rather than normalising to 1.0.
+- **Durations depend on project settings.** A duration is stored as a raw
+  count plus a units code; turning that into the days or weeks MS Project
+  displays uses the file's own `MinutesPerDay`/`MinutesPerWeek`/
+  `DaysPerMonth`, so the same stored value means different things in a
+  file set to an 8-hour day and one set to 12.
+- **Document metadata comes from the Props stream.** MS Project writes the
+  title, author and so on both there and into the OLE
+  `\x05SummaryInformation` property set. This reader uses the Props copy
+  and does not parse that property set, so a value MS Project left only in
+  the latter is missed.
 
 ## License
 

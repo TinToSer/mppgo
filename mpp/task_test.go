@@ -3,7 +3,11 @@
 
 package mpp
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tintoser/mppgo/project"
+)
 
 func TestTaskMilestoneBitLayout(t *testing.T) {
 	if offset, mask := taskMilestoneBitLayout(appVersionProject2010); offset != 8 || mask != 0x20 {
@@ -35,6 +39,24 @@ func TestTaskCalendarUniqueID(t *testing.T) {
 	}
 	if got := taskCalendarUniqueID(0); got != 0 {
 		t.Errorf("taskCalendarUniqueID(0) = %d, want 0", got)
+	}
+}
+
+func TestTaskType(t *testing.T) {
+	cases := map[int]project.TaskType{
+		0: project.FixedUnits,
+		1: project.FixedDuration,
+		2: project.FixedWork,
+	}
+	for code, want := range cases {
+		if got := taskType(code); got != want {
+			t.Errorf("taskType(%d) = %v, want %v", code, got, want)
+		}
+	}
+	// MS Project writes only those three; anything else falls back to
+	// fixed work, matching MPXJ.
+	if got := taskType(99); got != project.FixedWork {
+		t.Errorf("taskType(unknown) = %v, want FixedWork", got)
 	}
 }
 

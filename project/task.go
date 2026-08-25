@@ -38,10 +38,38 @@ type Task struct {
 	ActualStart  time.Time
 	ActualFinish time.Time
 
+	// Deadline is a target date that does not constrain scheduling but
+	// which MS Project flags when missed. Created records when the task was
+	// added. Both are zero if unset.
+	Deadline time.Time
+	Created  time.Time
+
+	// Slack is how far the task can move before it affects the project
+	// finish. FreeSlack is the amount that does not affect any successor.
+	FreeSlack   Duration
+	StartSlack  Duration
+	FinishSlack Duration
+
+	ActualDuration    Duration
+	RemainingDuration Duration
+
 	// Work is the effort assigned to the task, Cost its total cost.
-	Work       Duration
-	ActualWork Duration
-	Cost       float64
+	Work          Duration
+	ActualWork    Duration
+	RemainingWork Duration
+	Cost          float64
+	FixedCost     float64
+	ActualCost    float64
+	RemainingCost float64
+
+	// PercentWorkComplete tracks completion by effort, where
+	// PercentComplete above tracks it by duration; the two differ whenever
+	// effort is not spread evenly across the task.
+	PercentWorkComplete float64
+
+	// Type decides which of duration, work and units MS Project holds fixed
+	// when rescheduling.
+	Type TaskType
 
 	// ConstraintType defaults to AsSoonAsPossible, the unconstrained case.
 	// ConstraintDate is zero for constraint types that do not use a date.
@@ -67,6 +95,9 @@ type Task struct {
 	// Predecessors are the dependencies this task waits on; Successors are
 	// the dependencies that wait on it. Both point at the same Relation
 	// values held in File.Relations, so a relation is never duplicated.
+	//
+	// Both ends of every relation listed here resolve to a task that was
+	// read, so File.TaskByID on either end returns non-nil.
 	Predecessors []*Relation
 	Successors   []*Relation
 

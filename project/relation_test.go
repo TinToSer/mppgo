@@ -47,19 +47,43 @@ func TestAddRelationLinksBothTasks(t *testing.T) {
 }
 
 // A relation naming a task that was never read must still be recorded, but
-// must not create a link to a task that does not exist.
-func TestAddRelationToleratesUnknownTasks(t *testing.T) {
+// must stay out of the per-task lists — callers rely on being able to
+// dereference both ends of anything reached through those.
+func TestAddRelationKeepsHalfResolvedOutOfTaskLists(t *testing.T) {
 	f := New()
 	known := &Task{UniqueID: 1}
 	f.AddTask(known)
 
 	f.AddRelation(&Relation{PredecessorUniqueID: 1, SuccessorUniqueID: 999})
+	f.AddRelation(&Relation{PredecessorUniqueID: 999, SuccessorUniqueID: 1})
 
-	if len(f.Relations) != 1 {
-		t.Errorf("len(Relations) = %d, want 1", len(f.Relations))
+	if len(f.Relations) != 2 {
+		t.Errorf("len(Relations) = %d, want 2 (both still recorded)", len(f.Relations))
 	}
-	if len(known.Successors) != 1 {
-		t.Errorf("len(known.Successors) = %d, want 1", len(known.Successors))
+	if len(known.Successors) != 0 {
+		t.Errorf("len(known.Successors) = %d, want 0 (the other end is unknown)", len(known.Successors))
+	}
+	if len(known.Predecessors) != 0 {
+		t.Errorf("len(known.Predecessors) = %d, want 0 (the other end is unknown)", len(known.Predecessors))
+	}
+}
+
+// Every relation reachable from a task must have both ends resolvable.
+func TestTaskRelationEndsAlwaysResolve(t *testing.T) {
+	f := New()
+	a := &Task{UniqueID: 1}
+	b := &Task{UniqueID: 2}
+	f.AddTask(a)
+	f.AddTask(b)
+	f.AddRelation(&Relation{PredecessorUniqueID: 1, SuccessorUniqueID: 2})
+	f.AddRelation(&Relation{PredecessorUniqueID: 1, SuccessorUniqueID: 404})
+
+	for _, task := range f.Tasks {
+		for _, r := range append(append([]*Relation(nil), task.Predecessors...), task.Successors...) {
+			if f.TaskByID(r.PredecessorUniqueID) == nil || f.TaskByID(r.SuccessorUniqueID) == nil {
+				t.Errorf("task %d exposes a relation with an unresolvable end", task.UniqueID)
+			}
+		}
 	}
 }
 

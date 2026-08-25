@@ -8,10 +8,21 @@ import "time"
 // Properties holds project-level (header) properties. Field set will grow
 // as the MPP/MSPDI readers gain coverage.
 type Properties struct {
-	// Name is the project title. Not yet populated from MPP: the title
-	// lives in the standard OLE "\x05SummaryInformation" property set,
-	// which this reader does not parse yet.
-	Name string
+	// Name is the project title, and the fields below it are the rest of
+	// the document metadata a user can set in MS Project's project
+	// information dialog. Any of them may be empty.
+	//
+	// A file created from a template often carries the template's title
+	// rather than one describing this particular project, so treat Name as
+	// what the file says rather than as authoritative.
+	Name     string
+	Subject  string
+	Author   string
+	Manager  string
+	Company  string
+	Category string
+	Keywords string
+	Comments string
 
 	// FilePath is the path the file was last saved to, which for
 	// SharePoint-hosted plans is a URL.

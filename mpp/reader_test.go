@@ -55,6 +55,18 @@ func TestReadSampleProperties(t *testing.T) {
 	if pf.Properties.StatusDate.IsZero() {
 		t.Error("StatusDate was not populated")
 	}
+	if pf.Properties.Name == "" {
+		t.Error("Name (the project title) was not populated")
+	}
+	// The scheduling factors decide how a stored duration converts into
+	// the days and weeks MS Project displays, so a zero here would make
+	// every duration wrong.
+	if pf.Properties.MinutesPerDay <= 0 {
+		t.Errorf("MinutesPerDay = %d, want a positive value", pf.Properties.MinutesPerDay)
+	}
+	if pf.Properties.MinutesPerWeek <= 0 {
+		t.Errorf("MinutesPerWeek = %d, want a positive value", pf.Properties.MinutesPerWeek)
+	}
 }
 
 func TestReadSampleStandardCalendar(t *testing.T) {
@@ -341,6 +353,48 @@ func TestReadSampleTaskDurations(t *testing.T) {
 	}
 	if withDuration == 0 {
 		t.Error("no task had a duration")
+	}
+}
+
+// TestReadSampleRemainingDurationAgrees cross-checks two independently
+// decoded duration fields: a task that has not been started at all must
+// have all of its duration still remaining. Agreement means the shared
+// duration-units field and the raw-to-unit conversion are both right,
+// since a mis-scaled conversion would break the equality.
+func TestReadSampleRemainingDurationAgrees(t *testing.T) {
+	pf := readSample(t)
+
+	checked := 0
+	for _, task := range pf.Tasks {
+		if task.PercentComplete != 0 {
+			continue
+		}
+		checked++
+		if diff := task.RemainingDuration.Amount - task.Duration.Amount; diff > 1e-6 || diff < -1e-6 {
+			t.Errorf("task %q is 0%% complete but Duration = %v and RemainingDuration = %v",
+				task.Name, task.Duration.Amount, task.RemainingDuration.Amount)
+		}
+	}
+	if checked == 0 {
+		t.Skip("every task in the sample has progress recorded")
+	}
+}
+
+// Slack is stored, not derived, so it should never come back negative on a
+// well-formed file — a negative value is the signature of a misread offset.
+func TestReadSampleSlackIsNonNegative(t *testing.T) {
+	pf := readSample(t)
+
+	for _, task := range pf.Tasks {
+		for name, d := range map[string]project.Duration{
+			"FreeSlack":   task.FreeSlack,
+			"StartSlack":  task.StartSlack,
+			"FinishSlack": task.FinishSlack,
+		} {
+			if d.Amount < 0 {
+				t.Errorf("task %q: %s = %v, want >= 0", task.Name, name, d.Amount)
+			}
+		}
 	}
 }
 

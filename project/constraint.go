@@ -49,6 +49,31 @@ func (c ConstraintType) String() string {
 	}
 }
 
+// TaskType controls which of duration, work and units MS Project holds
+// fixed when rescheduling forces the other two to change.
+type TaskType int
+
+// The numeric values match how MS Project stores them.
+const (
+	FixedUnits    TaskType = 0
+	FixedDuration TaskType = 1
+	FixedWork     TaskType = 2
+)
+
+// String returns the name MS Project displays for the task type.
+func (t TaskType) String() string {
+	switch t {
+	case FixedUnits:
+		return "Fixed Units"
+	case FixedDuration:
+		return "Fixed Duration"
+	case FixedWork:
+		return "Fixed Work"
+	default:
+		return "Unknown"
+	}
+}
+
 // ResourceType distinguishes the three kinds of resource MS Project
 // supports, which are costed and scheduled differently.
 type ResourceType int

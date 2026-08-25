@@ -37,10 +37,23 @@ const (
 	taskFieldIDConstraintType   = 17
 	taskFieldIDConstraintDate   = 18
 	taskFieldIDPriority         = 25
-	// Start/Finish (block 1/Fixed2Data): the date MS Project currently
-	// shows for the task, as opposed to the CPM-computed
-	// EARLY_START/EARLY_FINISH pair (block 0), which this reader does not
-	// expose.
+	taskFieldIDFreeSlack        = 21
+	taskFieldIDStartSlack       = 438
+	taskFieldIDFinishSlack      = 439
+	taskFieldIDActualDuration   = 28
+	taskFieldIDRemainingDur     = 31
+	taskFieldIDPercentWorkDone  = 33
+	taskFieldIDType             = 128
+	taskFieldIDCreated          = 93
+	taskFieldIDDeadline         = 437
+	taskFieldIDRemainingWork    = 4
+	taskFieldIDFixedCost        = 8
+	taskFieldIDActualCost       = 7
+	taskFieldIDRemainingCost    = 10
+	// Start/Finish live in block 1 (Fixed2Data), unlike everything above:
+	// they are the dates MS Project currently shows for the task, as
+	// opposed to the critical-path EARLY_START/EARLY_FINISH pair in
+	// block 0.
 	taskFieldIDStart  = 1283
 	taskFieldIDFinish = 1284
 
@@ -66,6 +79,19 @@ const (
 	taskDefaultOffsetConstraintType   = 56
 	taskDefaultOffsetConstraintDate   = 80
 	taskDefaultOffsetPriority         = 88
+	taskDefaultOffsetFreeSlack        = 24
+	taskDefaultOffsetStartSlack       = 28
+	taskDefaultOffsetFinishSlack      = 32
+	taskDefaultOffsetActualDuration   = 48
+	taskDefaultOffsetRemainingDur     = 52
+	taskDefaultOffsetPercentWorkDone  = 92
+	taskDefaultOffsetType             = 94
+	taskDefaultOffsetCreated          = 98
+	taskDefaultOffsetDeadline         = 122
+	taskDefaultOffsetRemainingWork    = 142
+	taskDefaultOffsetFixedCost        = 158
+	taskDefaultOffsetActualCost       = 166
+	taskDefaultOffsetRemainingCost    = 174
 
 	// Default offsets within a TBkndTask Fixed2Data record (block 1).
 	taskDefault2OffsetStart  = 50
@@ -181,6 +207,19 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 	offConstraintType := off(taskFieldIDConstraintType, taskDefaultOffsetConstraintType)
 	offConstraintDate := off(taskFieldIDConstraintDate, taskDefaultOffsetConstraintDate)
 	offPriority := off(taskFieldIDPriority, taskDefaultOffsetPriority)
+	offFreeSlack := off(taskFieldIDFreeSlack, taskDefaultOffsetFreeSlack)
+	offStartSlack := off(taskFieldIDStartSlack, taskDefaultOffsetStartSlack)
+	offFinishSlack := off(taskFieldIDFinishSlack, taskDefaultOffsetFinishSlack)
+	offActualDuration := off(taskFieldIDActualDuration, taskDefaultOffsetActualDuration)
+	offRemainingDur := off(taskFieldIDRemainingDur, taskDefaultOffsetRemainingDur)
+	offPercentWorkDone := off(taskFieldIDPercentWorkDone, taskDefaultOffsetPercentWorkDone)
+	offType := off(taskFieldIDType, taskDefaultOffsetType)
+	offCreated := off(taskFieldIDCreated, taskDefaultOffsetCreated)
+	offDeadline := off(taskFieldIDDeadline, taskDefaultOffsetDeadline)
+	offRemainingWork := off(taskFieldIDRemainingWork, taskDefaultOffsetRemainingWork)
+	offFixedCost := off(taskFieldIDFixedCost, taskDefaultOffsetFixedCost)
+	offActualCost := off(taskFieldIDActualCost, taskDefaultOffsetActualCost)
+	offRemainingCost := off(taskFieldIDRemainingCost, taskDefaultOffsetRemainingCost)
 
 	milestoneOffset, milestoneMask := taskMilestoneBitLayout(applicationVersion)
 	activeOffset, activeMask := taskActiveBitLayout(applicationVersion)
@@ -208,24 +247,38 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 			continue
 		}
 
+		// One units field governs the task's duration and every duration
+		// derived from it (slack, actual, remaining).
+		durationUnits := durationTimeUnits(getShort(rec, offDurationUnits), defaultUnits)
+
 		t := &project.Task{
-			UniqueID:         uniqueID,
-			ID:               getInt(rec, offID),
-			OutlineLevel:     getShort(rec, offOutlineLevel),
-			ParentUniqueID:   getInt(rec, offParentUniqueID),
-			PercentComplete:  float64(taskPercentage(rec, offPercentComplete)),
-			CalendarUniqueID: taskCalendarUniqueID(getInt(rec, offCalendarUniqueID)),
-			WBS:              varData.UnicodeString(uniqueID, taskWBSVarType),
-			Name:             varData.UnicodeString(uniqueID, taskNameVarType),
-			Duration: scale.duration(
-				getInt(rec, offDuration),
-				durationTimeUnits(getShort(rec, offDurationUnits), defaultUnits),
-			),
-			Work:           getWork(rec, offWork),
-			ActualWork:     getWork(rec, offActualWork),
-			Cost:           getCurrency(rec, offCost),
-			ConstraintType: project.ConstraintType(getShort(rec, offConstraintType)),
-			Priority:       getShort(rec, offPriority),
+			UniqueID:            uniqueID,
+			ID:                  getInt(rec, offID),
+			OutlineLevel:        getShort(rec, offOutlineLevel),
+			ParentUniqueID:      getInt(rec, offParentUniqueID),
+			PercentComplete:     float64(taskPercentage(rec, offPercentComplete)),
+			CalendarUniqueID:    taskCalendarUniqueID(getInt(rec, offCalendarUniqueID)),
+			WBS:                 varData.UnicodeString(uniqueID, taskWBSVarType),
+			Name:                varData.UnicodeString(uniqueID, taskNameVarType),
+			Duration:            scale.duration(getInt(rec, offDuration), durationUnits),
+			Work:                getWork(rec, offWork),
+			ActualWork:          getWork(rec, offActualWork),
+			RemainingWork:       getWork(rec, offRemainingWork),
+			Cost:                getCurrency(rec, offCost),
+			FixedCost:           getCurrency(rec, offFixedCost),
+			ActualCost:          getCurrency(rec, offActualCost),
+			RemainingCost:       getCurrency(rec, offRemainingCost),
+			ConstraintType:      project.ConstraintType(getShort(rec, offConstraintType)),
+			Priority:            getShort(rec, offPriority),
+			PercentWorkComplete: float64(taskPercentage(rec, offPercentWorkDone)),
+			Type:                taskType(getShort(rec, offType)),
+			// Slack and the actual/remaining durations share the task's
+			// own duration-units field.
+			FreeSlack:         scale.duration(getInt(rec, offFreeSlack), durationUnits),
+			StartSlack:        scale.duration(getInt(rec, offStartSlack), durationUnits),
+			FinishSlack:       scale.duration(getInt(rec, offFinishSlack), durationUnits),
+			ActualDuration:    scale.duration(getInt(rec, offActualDuration), durationUnits),
+			RemainingDuration: scale.duration(getInt(rec, offRemainingDur), durationUnits),
 		}
 		for _, f := range []struct {
 			dst    *time.Time
@@ -238,6 +291,8 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 			{&t.ActualStart, offActualStart},
 			{&t.ActualFinish, offActualFinish},
 			{&t.ConstraintDate, offConstraintDate},
+			{&t.Deadline, offDeadline},
+			{&t.Created, offCreated},
 		} {
 			if d, ok := getTimestamp(rec, f.offset); ok {
 				*f.dst = d
@@ -302,6 +357,19 @@ func taskCalendarUniqueID(raw int) int {
 		return 0
 	}
 	return raw
+}
+
+// taskType maps the stored task-type code. MS Project writes only three
+// values here; anything else falls back to fixed work, as MPXJ does.
+func taskType(code int) project.TaskType {
+	switch code {
+	case 0:
+		return project.FixedUnits
+	case 1:
+		return project.FixedDuration
+	default:
+		return project.FixedWork
+	}
 }
 
 // taskPercentage decodes a percentage stored as a raw short 0..100,

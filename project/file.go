@@ -73,18 +73,23 @@ func (f *File) AddAssignment(a *Assignment) {
 	f.Assignments = append(f.Assignments, a)
 }
 
-// AddRelation registers a task dependency, linking it into both the
-// predecessor's and the successor's lists. Ends that do not resolve to a
-// known task are skipped, so a relation referencing a task that was never
-// read still lands in File.Relations but does not create a dangling link.
+// AddRelation registers a task dependency. It is linked into the tasks'
+// Predecessors/Successors lists only when both ends resolve to a task that
+// was actually read; a relation naming an unknown task is still recorded in
+// Relations, but is left out of the per-task lists.
+//
+// That is what lets callers dereference both ends of any relation reached
+// through Task.Predecessors or Task.Successors without a nil check.
 func (f *File) AddRelation(r *Relation) {
 	f.Relations = append(f.Relations, r)
-	if pred := f.TaskByID(r.PredecessorUniqueID); pred != nil {
-		pred.Successors = append(pred.Successors, r)
+
+	pred := f.TaskByID(r.PredecessorUniqueID)
+	succ := f.TaskByID(r.SuccessorUniqueID)
+	if pred == nil || succ == nil {
+		return
 	}
-	if succ := f.TaskByID(r.SuccessorUniqueID); succ != nil {
-		succ.Predecessors = append(succ.Predecessors, r)
-	}
+	pred.Successors = append(pred.Successors, r)
+	succ.Predecessors = append(succ.Predecessors, r)
 }
 
 // CalendarByID looks up a calendar by its unique ID.
