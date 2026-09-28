@@ -149,3 +149,99 @@ func (c *Calendar) HoursOn(date time.Time) []TimeRange {
 	}
 	return c.HoursFor(date.Weekday())
 }
+
+// calendarMaxDaysScan bounds every day-by-day walk below, so a pathological
+// or corrupt input (an end date centuries away, a calendar that is
+// non-working every single day) degrades to a capped result instead of an
+// effectively unbounded loop.
+const calendarMaxDaysScan = 20000 // ~55 years
+
+// WorkMinutesBetween returns the total working time in [start, end), in
+// minutes, according to this calendar's working days/hours and exceptions.
+// Used to turn a stored amount of work into the "per hour" rate MS Project
+// itself shows for a timephased span (see the project's Duration model);
+// not a general-purpose scheduling primitive.
+func (c *Calendar) WorkMinutesBetween(start, end time.Time) float64 {
+	if !end.After(start) {
+		return 0
+	}
+
+	var total float64
+	day := truncateToDay(start)
+	for i := 0; i < calendarMaxDaysScan && !day.After(end); i++ {
+		for _, r := range c.HoursOn(day) {
+			rangeStart, rangeEnd := day.Add(r.Start), day.Add(r.End)
+			os, oe := rangeStart, rangeEnd
+			if start.After(os) {
+				os = start
+			}
+			if end.Before(oe) {
+				oe = end
+			}
+			if oe.After(os) {
+				total += oe.Sub(os).Minutes()
+			}
+		}
+		day = day.AddDate(0, 0, 1)
+	}
+	return total
+}
+
+// NextWorkStart returns the next instant at or after t that falls within a
+// working period — t itself, if it already does.
+func (c *Calendar) NextWorkStart(t time.Time) time.Time {
+	cursor := t
+	day := truncateToDay(t)
+	for i := 0; i < calendarMaxDaysScan; i++ {
+		for _, r := range c.HoursOn(day) {
+			rangeStart, rangeEnd := day.Add(r.Start), day.Add(r.End)
+			if cursor.Before(rangeEnd) {
+				if cursor.Before(rangeStart) {
+					return rangeStart
+				}
+				return cursor
+			}
+		}
+		day = day.AddDate(0, 0, 1)
+		cursor = day
+	}
+	return t // gave up: leave the caller with what it started with
+}
+
+// AdvanceByWork returns the instant reached after minutes of working time,
+// starting from the next working instant at or after start (so a start
+// that falls outside working hours snaps forward first, matching how MS
+// Project itself schedules from a non-working moment).
+func (c *Calendar) AdvanceByWork(start time.Time, minutes float64) time.Time {
+	cursor := c.NextWorkStart(start)
+	if minutes <= 0 {
+		return cursor
+	}
+
+	remaining := minutes
+	day := truncateToDay(cursor)
+	for i := 0; i < calendarMaxDaysScan; i++ {
+		for _, r := range c.HoursOn(day) {
+			rangeStart, rangeEnd := day.Add(r.Start), day.Add(r.End)
+			if !rangeEnd.After(cursor) {
+				continue
+			}
+			segStart := rangeStart
+			if cursor.After(segStart) {
+				segStart = cursor
+			}
+			available := rangeEnd.Sub(segStart).Minutes()
+			if available <= 0 {
+				continue
+			}
+			if remaining <= available {
+				return segStart.Add(time.Duration(remaining * float64(time.Minute)))
+			}
+			remaining -= available
+			cursor = rangeEnd
+		}
+		day = day.AddDate(0, 0, 1)
+		cursor = day
+	}
+	return cursor // gave up: return as far as the scan got
+}

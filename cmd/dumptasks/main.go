@@ -1,27 +1,37 @@
 // Authored By: TinToSer (github.com/tintoser)
 // Developed by: Claude Sonnet
 
-// Command dumptasks reads an MPP file and prints its task hierarchy,
-// schedule dates and dependencies, for manual inspection.
+// Command dumptasks reads an MPP or MSPDI (Project XML) file and prints its
+// task hierarchy, schedule dates and dependencies, for manual inspection.
 package main
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/tintoser/mppgo/mpp"
+	"github.com/tintoser/mppgo/mspdi"
 	"github.com/tintoser/mppgo/project"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: dumptasks <file.mpp>")
+		fmt.Fprintln(os.Stderr, "usage: dumptasks <file.mpp|file.xml>")
 		os.Exit(2)
 	}
 
-	pf, err := mpp.ReadFile(os.Args[1])
+	path := os.Args[1]
+	var pf *project.File
+	var err error
+	if strings.EqualFold(filepath.Ext(path), ".xml") {
+		pf, err = mspdi.ReadFile(path)
+	} else {
+		pf, err = mpp.ReadFile(path)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -76,6 +86,37 @@ func describe(pf *project.File, t *project.Task) {
 	}
 	fmt.Println()
 
+	if b := t.Baseline; b != nil {
+		fmt.Printf("%s    baseline %s .. %s", indent, date(b.Start), date(b.Finish))
+		if b.Duration.Amount != 0 {
+			fmt.Printf("  %.1f%s", b.Duration.Amount, b.Duration.Units)
+		}
+		if b.Work.Amount != 0 {
+			fmt.Printf("  work=%.1f%s", b.Work.Amount, b.Work.Units)
+		}
+		if b.Cost != 0 {
+			fmt.Printf("  cost=%.2f", b.Cost)
+		}
+		fmt.Println()
+	}
+
+	if len(t.CustomFields) > 0 {
+		names := make([]string, 0, len(t.CustomFields))
+		for name := range t.CustomFields {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		fmt.Printf("%s    fields:", indent)
+		for _, name := range names {
+			fmt.Printf("  %s=%v", name, t.CustomFields[name])
+		}
+		fmt.Println()
+	}
+
+	if t.Notes != "" {
+		fmt.Printf("%s    note: %s\n", indent, strings.ReplaceAll(t.Notes, "\n", "\n"+indent+"          "))
+	}
+
 	for _, r := range t.Predecessors {
 		pred := pf.TaskByID(r.PredecessorUniqueID)
 		predName := "(unknown)"
@@ -100,6 +141,9 @@ func describe(pf *project.File, t *project.Task) {
 		fmt.Printf("%s    resource %s (%.0f%%", indent, res.Name, a.Units)
 		if a.Work.Amount != 0 {
 			fmt.Printf(", %.1f%s", a.Work.Amount, a.Work.Units)
+		}
+		if len(a.TimephasedWork) > 0 {
+			fmt.Printf(", %d timephased span(s)", len(a.TimephasedWork))
 		}
 		fmt.Println(")")
 	}

@@ -120,6 +120,23 @@ func getTimestamp(data []byte, offset int) (time.Time, bool) {
 	return result, true
 }
 
+// getTimestampFromTenths reads a combined date+time value encoded as a
+// single 32-bit count of tenths of a minute since the MPP epoch — the
+// encoding used by cost rate tables and availability tables, distinct from
+// getTimestamp's split 2-byte-time/2-byte-day-count layout used everywhere
+// else in fixed data.
+//
+// This deliberately adds via Unix seconds rather than epoch.Add(Duration):
+// a Duration is a count of nanoseconds, so multiplying a large-but-in-range
+// int32 field (as untrusted input can easily supply, deliberately or not)
+// by 6 and then by time.Second overflows int64 well before the timestamp
+// itself would be out of range, wrapping around to a nonsense date instead
+// of a merely-implausible one.
+func getTimestampFromTenths(data []byte, offset int) time.Time {
+	seconds := int64(getInt(data, offset)) * 6
+	return time.Unix(epoch.Unix()+seconds, 0).UTC()
+}
+
 // getUnicodeString reads a NUL-terminated UTF-16LE string starting at offset.
 func getUnicodeString(data []byte, offset int) string {
 	if offset < 0 || offset >= len(data) {

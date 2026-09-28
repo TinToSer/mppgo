@@ -128,6 +128,26 @@ func (f *File) TaskCalendar(t *Task) *Calendar {
 	return f.DefaultCalendar
 }
 
+// AssignmentCalendar resolves the calendar an assignment's own scheduling
+// is based on: the resource's calendar if it has one and is a work
+// resource, otherwise the task's effective calendar (see TaskCalendar).
+//
+// This is a simplified stand-in for MS Project's own resolution, which for
+// a task that has both an explicit calendar and a resource calendar
+// combines the two (taking their intersection) rather than picking one —
+// a case this reader does not attempt to reproduce.
+func (f *File) AssignmentCalendar(a *Assignment) *Calendar {
+	if r := f.ResourceByID(a.ResourceUniqueID); r != nil && r.Type == WorkResource {
+		if cal := f.CalendarByID(r.CalendarUniqueID); cal != nil {
+			return cal
+		}
+	}
+	if t := f.TaskByID(a.TaskUniqueID); t != nil {
+		return f.TaskCalendar(t)
+	}
+	return f.DefaultCalendar
+}
+
 // BaseCalendars returns the calendars that are not derived from another —
 // the named calendars a user would pick from in MS Project.
 func (f *File) BaseCalendars() []*Calendar {

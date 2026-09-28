@@ -92,6 +92,21 @@ type Task struct {
 
 	ParentUniqueID int // 0 if top-level
 
+	// Notes is the task's Notes field with RTF formatting stripped down to
+	// plain text — what MS Project itself shows in the Notes box. RTFNotes
+	// keeps the original RTF for a caller that needs the formatting (or the
+	// embedded objects RTFEmbeddedObject-style tools would extract from it).
+	// Both are empty if the task has no note.
+	Notes    string
+	RTFNotes string
+
+	// Baseline is the task's primary baseline snapshot, and Baselines holds
+	// the numbered ones MS Project supports (Baseline1..Baseline10), keyed
+	// by that number. Both are nil/absent until the corresponding "Set
+	// Baseline" has been run at least once.
+	Baseline  *Baseline
+	Baselines map[int]*Baseline
+
 	// Predecessors are the dependencies this task waits on; Successors are
 	// the dependencies that wait on it. Both point at the same Relation
 	// values held in File.Relations, so a relation is never duplicated.

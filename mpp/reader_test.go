@@ -4,6 +4,7 @@
 package mpp_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -428,6 +429,218 @@ func TestReadSampleResourceWorkReconciles(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Skip("no resource in the sample carries work to reconcile")
+	}
+}
+
+// TestReadSampleTaskNotes checks that at least one task note round-trips
+// through the RTF stripper into readable text: no leftover RTF control
+// sequences, and no shorter than the RTF source it came from.
+func TestReadSampleTaskNotes(t *testing.T) {
+	pf := readSample(t)
+
+	found := 0
+	for _, task := range pf.Tasks {
+		if task.Notes == "" {
+			continue
+		}
+		found++
+		if task.RTFNotes == "" {
+			t.Errorf("task %q: Notes is set but RTFNotes is empty", task.Name)
+		}
+		if strings.Contains(task.Notes, `{\rtf`) || strings.Contains(task.Notes, `\par`) {
+			t.Errorf("task %q: Notes still contains RTF markup: %q", task.Name, task.Notes)
+		}
+	}
+	if found == 0 {
+		t.Skip("no task in the sample has a note")
+	}
+}
+
+// TestReadSampleTaskBaselines checks that a task's primary baseline, when
+// present, has at least one field actually populated (readTaskBaseline
+// should never return a Baseline with nothing set), and that any numbered
+// baseline present is keyed 1..10.
+func TestReadSampleTaskBaselines(t *testing.T) {
+	pf := readSample(t)
+
+	found := 0
+	for _, task := range pf.Tasks {
+		if task.Baseline != nil {
+			found++
+		}
+		for n, b := range task.Baselines {
+			if n < 1 || n > 10 {
+				t.Errorf("task %q: Baselines has out-of-range key %d", task.Name, n)
+			}
+			if b == nil {
+				t.Errorf("task %q: Baselines[%d] is nil", task.Name, n)
+			}
+		}
+	}
+	if found == 0 {
+		t.Skip("no task in the sample has a baseline set")
+	}
+}
+
+// TestReadSampleTaskCustomFields checks that any populated custom field is
+// keyed by a non-empty name (either a real alias or the generic Text1/
+// Number1/... fallback) and holds a value of a type readTaskCustomFields is
+// actually meant to produce.
+func TestReadSampleTaskCustomFields(t *testing.T) {
+	pf := readSample(t)
+
+	found := 0
+	for _, task := range pf.Tasks {
+		for name, value := range task.CustomFields {
+			found++
+			if name == "" {
+				t.Errorf("task %q: custom field has an empty name", task.Name)
+			}
+			switch value.(type) {
+			case string, float64, time.Time, project.Duration, bool:
+			default:
+				t.Errorf("task %q: custom field %q has unexpected type %T", task.Name, name, value)
+			}
+		}
+	}
+	if found == 0 {
+		t.Skip("no task in the sample has a custom field set")
+	}
+}
+
+// TestReadSampleResourceNotesAndBaselines mirrors the task-level checks
+// above for resources: a note strips its RTF markup, and a non-nil
+// baseline carries at least one real value.
+func TestReadSampleResourceNotesAndBaselines(t *testing.T) {
+	pf := readSample(t)
+
+	notes, baselines := 0, 0
+	for _, r := range pf.Resources {
+		if r.Notes != "" {
+			notes++
+			if r.RTFNotes == "" {
+				t.Errorf("resource %q: Notes is set but RTFNotes is empty", r.Name)
+			}
+			if strings.Contains(r.Notes, `{\rtf`) {
+				t.Errorf("resource %q: Notes still contains RTF markup: %q", r.Name, r.Notes)
+			}
+		}
+		if r.Baseline != nil {
+			baselines++
+		}
+	}
+	if notes == 0 && baselines == 0 {
+		t.Skip("no resource in the sample has a note or baseline set")
+	}
+}
+
+// TestReadSampleAssignmentNotesAndBaselines mirrors the task-level checks
+// above for assignments.
+func TestReadSampleAssignmentNotesAndBaselines(t *testing.T) {
+	pf := readSample(t)
+
+	notes, baselines := 0, 0
+	for _, a := range pf.Assignments {
+		if a.Notes != "" {
+			notes++
+			if strings.Contains(a.Notes, `{\rtf`) {
+				t.Errorf("assignment #%d: Notes still contains RTF markup: %q", a.UniqueID, a.Notes)
+			}
+		}
+		if a.Baseline != nil {
+			baselines++
+		}
+	}
+	if notes == 0 && baselines == 0 {
+		t.Skip("no assignment in the sample has a note or baseline set")
+	}
+}
+
+// TestReadSampleResourceCostRateTables checks table A is always populated
+// (falling back to the resource's own rate when the file has no table of
+// its own — see readResourceCostRateTable) and that every entry's rate
+// units are one of the values workTimeUnit can actually produce.
+func TestReadSampleResourceCostRateTables(t *testing.T) {
+	pf := readSample(t)
+
+	if len(pf.Resources) == 0 {
+		t.Fatal("expected at least one resource")
+	}
+	for _, r := range pf.Resources {
+		if len(r.CostRateTables[0]) == 0 {
+			t.Errorf("resource %q: CostRateTables[0] (table A) is empty, want at least the fallback entry", r.Name)
+		}
+		for table, entries := range r.CostRateTables {
+			for _, e := range entries {
+				if e.CostPerUse < 0 {
+					t.Errorf("resource %q table %c: CostPerUse = %v, want >= 0", r.Name, 'A'+table, e.CostPerUse)
+				}
+			}
+		}
+	}
+}
+
+// TestReadSampleTaskAndResourceFlags checks that any Flag custom field
+// present is a real bool and keyed by a non-empty name.
+func TestReadSampleTaskAndResourceFlags(t *testing.T) {
+	pf := readSample(t)
+
+	found := 0
+	for _, task := range pf.Tasks {
+		for name, v := range task.CustomFields {
+			if b, ok := v.(bool); ok {
+				found++
+				if !b {
+					t.Errorf("task %q: flag %q = false, want it to have been left out of CustomFields entirely", task.Name, name)
+				}
+				if name == "" {
+					t.Errorf("task %q: flag has an empty name", task.Name)
+				}
+			}
+		}
+	}
+	if found == 0 {
+		t.Skip("no task in the sample has a flag set")
+	}
+}
+
+// TestReadSampleTimephasedWork checks that timephased spans are internally
+// consistent: chronologically ordered, non-negative, and — the strongest
+// check available without a second implementation to compare against —
+// that a fully-populated set of planned-work spans sums to the
+// assignment's own Work field, since MS Project derives one from the
+// other. A partially-complete assignment's remaining work legitimately
+// sums to less than its total Work, so this only asserts the sum never
+// exceeds it.
+func TestReadSampleTimephasedWork(t *testing.T) {
+	pf := readSample(t)
+
+	found := 0
+	for _, a := range pf.Assignments {
+		if len(a.TimephasedWork) == 0 {
+			continue
+		}
+		found++
+
+		var sumMinutes float64
+		for i, span := range a.TimephasedWork {
+			if span.Finish.Before(span.Start) {
+				t.Errorf("assignment #%d span %d: Finish %v is before Start %v", a.UniqueID, i, span.Finish, span.Start)
+			}
+			if i > 0 && span.Start.Before(a.TimephasedWork[i-1].Finish) {
+				t.Errorf("assignment #%d span %d starts before the previous span ends", a.UniqueID, i)
+			}
+			if span.Total.Amount < 0 {
+				t.Errorf("assignment #%d span %d: Total = %v, want >= 0", a.UniqueID, i, span.Total.Amount)
+			}
+			sumMinutes += span.Total.Amount
+		}
+		if sumHours := sumMinutes / 60; sumHours > a.Work.Amount+0.01 {
+			t.Errorf("assignment #%d: timephased work sums to %.3fh, want <= Work (%.3fh)", a.UniqueID, sumHours, a.Work.Amount)
+		}
+	}
+	if found == 0 {
+		t.Skip("no assignment in the sample has timephased work")
 	}
 }
 

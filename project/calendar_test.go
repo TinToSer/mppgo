@@ -182,3 +182,95 @@ func TestTimeRangeDuration(t *testing.T) {
 		t.Errorf("Duration = %v, want %v", got, want)
 	}
 }
+
+// monday returns a known Monday (2026-05-04) at the given hour, so tests
+// can build times relative to it without hardcoding a specific year's
+// calendar layout beyond this one anchor.
+func monday(hour int) time.Time {
+	return date(2026, 5, 4).Add(time.Duration(hour) * time.Hour)
+}
+
+func TestWorkMinutesBetweenWithinOneDay(t *testing.T) {
+	c := baseCalendar()
+	// 10:00-14:00 on a working Monday, entirely within the 09:00-17:00 window.
+	got := c.WorkMinutesBetween(monday(10), monday(14))
+	if want := 4.0 * 60; got != want {
+		t.Errorf("WorkMinutesBetween = %v, want %v", got, want)
+	}
+}
+
+func TestWorkMinutesBetweenClipsToWorkingHours(t *testing.T) {
+	c := baseCalendar()
+	// 07:00-19:00 on a working Monday: only the 09:00-17:00 window counts.
+	got := c.WorkMinutesBetween(monday(7), monday(19))
+	if want := 8.0 * 60; got != want {
+		t.Errorf("WorkMinutesBetween = %v, want %v (the 8-hour working day)", got, want)
+	}
+}
+
+func TestWorkMinutesBetweenSkipsWeekend(t *testing.T) {
+	c := baseCalendar()
+	// Friday 09:00 through the following Monday 17:00: Fri (8h) + Mon (8h),
+	// Saturday and Sunday contribute nothing.
+	fri9 := monday(9).AddDate(0, 0, -3)
+	mon17 := monday(17)
+	got := c.WorkMinutesBetween(fri9, mon17)
+	if want := 16.0 * 60; got != want {
+		t.Errorf("WorkMinutesBetween = %v, want %v (two working days, weekend skipped)", got, want)
+	}
+}
+
+func TestNextWorkStartInsideWorkingHours(t *testing.T) {
+	c := baseCalendar()
+	t10 := monday(10)
+	if got := c.NextWorkStart(t10); !got.Equal(t10) {
+		t.Errorf("NextWorkStart(already working) = %v, want unchanged %v", got, t10)
+	}
+}
+
+func TestNextWorkStartBeforeAndAfterHours(t *testing.T) {
+	c := baseCalendar()
+	if got, want := c.NextWorkStart(monday(7)), monday(9); !got.Equal(want) {
+		t.Errorf("NextWorkStart(before hours) = %v, want %v (same day's start)", got, want)
+	}
+	// After Monday's hours end, the next working instant is Tuesday 09:00.
+	if got, want := c.NextWorkStart(monday(18)), monday(9).AddDate(0, 0, 1); !got.Equal(want) {
+		t.Errorf("NextWorkStart(after hours) = %v, want %v (next day's start)", got, want)
+	}
+	// After Friday's hours end, the next working instant skips the weekend.
+	fri18 := monday(18).AddDate(0, 0, 4)
+	nextMon9 := monday(9).AddDate(0, 0, 7)
+	if got := c.NextWorkStart(fri18); !got.Equal(nextMon9) {
+		t.Errorf("NextWorkStart(after Friday) = %v, want %v (Monday, weekend skipped)", got, nextMon9)
+	}
+}
+
+func TestAdvanceByWorkWithinOneDay(t *testing.T) {
+	c := baseCalendar()
+	got := c.AdvanceByWork(monday(10), 120) // 2 hours from 10:00
+	if want := monday(12); !got.Equal(want) {
+		t.Errorf("AdvanceByWork = %v, want %v", got, want)
+	}
+}
+
+func TestAdvanceByWorkCrossesToNextWorkingDay(t *testing.T) {
+	c := baseCalendar()
+	// From Monday 15:00 (2 working hours left that day), advance 4 hours:
+	// 2 hours finishes Monday's day, the remaining 2 land Tuesday 09:00-11:00.
+	got := c.AdvanceByWork(monday(15), 4*60)
+	want := monday(11).AddDate(0, 0, 1)
+	if !got.Equal(want) {
+		t.Errorf("AdvanceByWork = %v, want %v", got, want)
+	}
+}
+
+func TestAdvanceByWorkSnapsNonWorkingStartForward(t *testing.T) {
+	c := baseCalendar()
+	// Starting on a Saturday, work should begin the following Monday.
+	saturday := monday(9).AddDate(0, 0, 5)
+	got := c.AdvanceByWork(saturday, 60)
+	want := monday(10).AddDate(0, 0, 7)
+	if !got.Equal(want) {
+		t.Errorf("AdvanceByWork(from non-working day) = %v, want %v", got, want)
+	}
+}

@@ -173,7 +173,10 @@ func Read(r io.ReaderAt) (*project.File, error) {
 		pf.DefaultCalendar = cal
 	}
 
-	resources, err := readResources(src, projectDirPath, projectProps, compObj.ApplicationVersion)
+	aliases := readCustomFieldAliases(src, projectDirPath)
+	outlineCodeValues := readOutlineCodeValues(src, projectDirPath, compObj.ApplicationVersion)
+
+	resources, err := readResources(src, projectDirPath, projectProps, compObj.ApplicationVersion, scale, defaultDurationUnits, aliases, outlineCodeValues)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +187,7 @@ func Read(r io.ReaderAt) (*project.File, error) {
 		pf.AddResource(r)
 	}
 
-	tasks, err := readTasks(src, projectDirPath, projectProps, compObj.ApplicationVersion, scale, defaultDurationUnits)
+	tasks, err := readTasks(src, projectDirPath, projectProps, compObj.ApplicationVersion, scale, defaultDurationUnits, aliases, outlineCodeValues)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +205,7 @@ func Read(r io.ReaderAt) (*project.File, error) {
 		pf.AddRelation(r)
 	}
 
-	assignments, err := readAssignments(src, projectDirPath, projectProps)
+	assignments, err := readAssignments(src, projectDirPath, projectProps, pf)
 	if err != nil {
 		return nil, err
 	}

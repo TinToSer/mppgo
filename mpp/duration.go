@@ -119,6 +119,68 @@ func (s durationScale) duration(raw int, units project.TimeUnit) project.Duratio
 	return project.Duration{Amount: amount, Units: units}
 }
 
+// workTimeUnit decodes the "rate format" code used by cost rate tables and
+// a handful of other WORK_UNITS-typed fields: a 1-based index into MPXJ's
+// TimeUnit ordinals, which — unlike this reader's own project.TimeUnit
+// order — list Percent before Years. 0 ("not applicable"/absent) and 0xFFFF
+// (the cost rate table's own "just use hours" sentinel) both fall back to
+// Hours, matching MPXJ.
+func workTimeUnit(code int) project.TimeUnit {
+	switch code {
+	case 1:
+		return project.Minutes
+	case 2:
+		return project.Hours
+	case 3:
+		return project.Days
+	case 4:
+		return project.Weeks
+	case 5:
+		return project.Months
+	case 6:
+		return project.Percent
+	case 7:
+		return project.Years
+	case 8:
+		return project.ElapsedMinutes
+	case 9:
+		return project.ElapsedHours
+	case 10:
+		return project.ElapsedDays
+	case 11:
+		return project.ElapsedWeeks
+	case 12:
+		return project.ElapsedMonths
+	case 13:
+		return project.ElapsedYears
+	case 14:
+		return project.ElapsedPercent
+	default:
+		return project.Hours
+	}
+}
+
+// rate converts a per-hour rate into an amount per the given units — the
+// inverse of duration(), and used the same way: a cost rate table entry
+// stores a plain per-hour figure plus a units code, and this produces the
+// per-day/per-week/... amount MS Project itself displays.
+func (s durationScale) rate(perHour float64, units project.TimeUnit) float64 {
+	switch units {
+	case project.Minutes, project.ElapsedMinutes:
+		return perHour / 60
+	case project.Days, project.ElapsedDays:
+		return perHour * s.minutesPerDay / 60
+	case project.Weeks, project.ElapsedWeeks:
+		return perHour * s.minutesPerWeek / 60
+	case project.Months, project.ElapsedMonths:
+		return perHour * s.minutesPerDay * s.daysPerMonth / 60
+	case project.Years, project.ElapsedYears:
+		return perHour * s.minutesPerWeek * 52 / 60
+	default:
+		return perHour
+	}
+}
+
 // Work, cost and unit fields are all stored as 8-byte doubles, but each
 // with its own scale and its own "treat as nothing" threshold below which
 // MS Project itself shows an empty cell. The helpers below apply both.

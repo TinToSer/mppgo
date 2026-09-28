@@ -8,25 +8,30 @@ reverse engineered the undocumented MPP binary format. See [NOTICE](NOTICE).
 
 ## Status
 
-Reads the core schedule — tasks, resources, assignments, dependencies and
-calendars — verified against a real Project 2016/365 file. Custom fields,
-baselines and writing are not implemented.
+Reads the full task/resource/assignment schedule — hierarchy, dates,
+dependencies, calendars, notes, baselines and custom fields — from either
+MPP (binary) or MSPDI (XML) files, verified against real Project 2016/365
+files and, for MSPDI, against a hand-built document covering every area
+this reader supports (there is no reverse-engineering involved in MSPDI —
+see the `mspdi` package below — but also no real-world sample file to
+verify against, the way `mpp` has). Writing either format is not
+implemented.
 
-| Area | State |
-| --- | --- |
-| CFB / OLE2 container | Complete |
-| MPP14 binary primitives | Complete |
-| Project properties | Partial — title/metadata, file path, calendar, version, start/finish/status dates, scheduling factors |
-| Calendars | Complete — working weeks, hours, exceptions, inheritance |
-| Tasks | Core fields — hierarchy, WBS, all four date pairs, duration, slack, work, cost, constraint, type, flags |
-| Resources | Core fields — name, initials, type, group, rate, max units, work, cost, calendar |
-| Assignments | Partial — task/resource links, units, work |
-| Task dependencies | Complete — predecessors/successors, relation type, lag |
-| Task/resource notes | Not yet implemented (stored as RTF) |
-| Custom fields / baselines | Not yet implemented |
-| Timephased data | Not yet implemented |
-| MSPDI (XML) read/write | Not yet implemented |
-| MPP write | Not yet implemented |
+| Area | MPP (binary) | MSPDI (XML) |
+| --- | --- | --- |
+| Project properties | Partial — title/metadata, file path, calendar, version, start/finish/status dates, scheduling factors | Partial — same core subset |
+| Calendars | Complete — working weeks, hours, exceptions, inheritance | Complete, except work weeks (a named, date-ranged weekly override distinct from a plain exception) |
+| Tasks | Core fields — hierarchy, WBS, all four date pairs, duration, slack, work, cost, constraint, type, flags | Core fields — hierarchy (derived from OutlineLevel), dates, duration, work, cost, constraint, type |
+| Resources | Core fields — name, initials, type, group, rate, max units, work, cost, calendar | Core fields — same subset |
+| Assignments | Core fields — task/resource links, units, work, start/finish | Core fields — same subset |
+| Task dependencies | Complete — predecessors/successors, relation type, lag | Complete |
+| Notes | Complete — RTF stripped to plain text (`Notes`), original kept as `RTFNotes` | Complete — MSPDI stores notes as plain text already, so `RTFNotes` is always empty |
+| Baselines | Complete — primary baseline plus Baseline1-10, for tasks, resources and assignments | Complete |
+| Custom fields | Complete — Text1-30, Number1-20, Date1-10, Duration1-10, Cost1-10, Flag1-20 and Outline Code1-10 (resolved to their full "parent \| child" path), with user-defined aliases resolved | Text/Number/Date/Duration/Cost/Flag only — Outline Code fields and alias names are not read |
+| Resource cost rate tables (A-E) | Complete | Not yet implemented |
+| Resource availability table | Complete | Not yet implemented |
+| Timephased data | Partial — planned/remaining work and baseline work/cost, day-by-day; actual/completed work (which requires splicing in a second "worked outside normal hours" data block) not yet implemented | Not yet implemented |
+| Write | Not yet implemented | Not yet implemented |
 
 Scope is MPP14 (Project 2010 through 365) plus MSPDI. Legacy MPP8/9/12 and
 the non-Microsoft formats MPXJ supports are out of scope.
@@ -82,15 +87,31 @@ for _, t := range pf.Tasks {
 Password-protected files return `mpp.ErrPasswordProtected`; non-MPP14 files
 return `mpp.ErrUnsupportedFormat`.
 
+An MSPDI (Project XML) file targets the same model, through the `mspdi`
+package instead:
+
+```go
+import "github.com/tintoser/mppgo/mspdi"
+
+pf, err := mspdi.ReadFile("plan.xml")
+if err != nil {
+    log.Fatal(err)
+}
+// pf is a *project.File, identical in shape to what mpp.ReadFile returns.
+```
+
 ## Packages
 
 - `cfb` — Compound File Binary (OLE2) container reader. Generic MS-CFB, not
   Project-specific.
 - `mpp` — MPP14 reader: binary block primitives and entity readers.
+- `mspdi` — MSPDI (Project XML) reader, targeting the same `project.File`
+  model as `mpp`.
 - `project` — format-agnostic data model that readers and writers target.
 - `cmd/inspect` — dump a compound file's storage/stream tree.
 - `cmd/dumpcalendars` — dump a plan's properties and calendars.
-- `cmd/dumptasks` — dump a plan's task hierarchy, dates and dependencies.
+- `cmd/dumptasks` — dump a plan's task hierarchy, dates and dependencies;
+  reads either an `.mpp` or an `.xml` (MSPDI) file.
 
 ## Calendars
 
@@ -170,6 +191,97 @@ return errors, never panic or exhaust memory.
   `\x05SummaryInformation` property set. This reader uses the Props copy
   and does not parse that property set, so a value MS Project left only in
   the latter is missed.
+- **Notes are always RTF, even when the user typed plain text.** MS Project
+  wraps every note — task, resource or assignment — as an RTF document.
+  `Notes` is that RTF run through a from-scratch parser down to the plain
+  text MS Project itself shows in the Notes box; `RTFNotes` keeps the
+  original for a caller that wants the formatting.
+- **A baseline is a snapshot, not a rolling history.** `Baseline` is the
+  primary "Set Baseline" snapshot; `Baselines` holds the ten numbered ones
+  (`Baseline1`..`Baseline10`) MS Project also supports, keyed by that
+  number. Both are nil until the corresponding baseline has actually been
+  set — there is no "baseline equal to current schedule" default.
+- **A custom field absent from `CustomFields` means unset, not zero.** MS
+  Project only writes a Text/Number/Date/Duration/Cost field once it has a
+  value, so this reader mirrors that: a field with no data for a given task
+  or resource is left out of the map entirely rather than present with a
+  zero value indistinguishable from a real one. Keys use the alias a user
+  gave the field (Customize Fields) when it has one, falling back to the
+  generic name (`Text1`, `Number3`, ...) otherwise. A `Flag` field follows
+  the same convention in spirit but never appears as `false`: since MS
+  Project treats an unset flag as `No`, only a flag that is actually set
+  (`true`) is added.
+- **An Outline Code field resolves to its full path, not a raw index.**
+  What a task or resource actually stores for `Outline Code1`..`Outline
+  Code10` is a numeric ID into one shared, project-wide value tree (MS
+  Project's Outline Code lookup table), not the field's own value — this
+  reader follows that indirection and resolves it to the "parent \| child \|
+  ..." path MS Project itself displays, so `CustomFields["Outline Code3"]`
+  is a plain string like any other custom field.
+- **Custom-field aliases and definitions live per entity, not per project.**
+  Despite being genuinely project-wide data (one alias table covers task,
+  resource and assignment fields alike), MS Project writes a separate copy
+  of the alias/definition block to each entity's own Props stream
+  (`TBkndTask/Props`, `TBkndRsc/Props`, `TBkndAssn/Props`) rather than the
+  project-level one — this reader reads and merges all three.
+- **A resource's cost rate table A is often absent from the file, not
+  empty.** MS Project only writes a resource's five cost rate tables (A-E)
+  when at least one differs from "the resource's own rate, always"; table A
+  in particular is frequently left out entirely as an economy, in which
+  case `CostRateTables[0]` is synthesized from `StandardRate`/
+  `OvertimeRate`/`CostPerUse` as a single open-ended entry. Tables B-E stay
+  nil when genuinely never customized — there's no equivalent fallback for
+  them.
+- **Timephased data is stored as cumulative totals, not per-span amounts.**
+  MS Project writes each span's running total as of that span's end, not
+  the amount for that span alone — every reader here (planned work,
+  baseline work, baseline cost) subtracts the previous span's cumulative
+  figure to recover it, which is also why a truncated or reordered data
+  block would silently produce wrong amounts rather than an error: there is
+  no per-span checksum to catch it against.
+- **`Assignment.TimephasedWork` is remaining work, not always total work.**
+  The single stream backing it means one thing before a task starts and
+  another once it's partly done: MS Project reuses it to mean "work not yet
+  done" the moment any progress is recorded, so its total can be less than
+  `Assignment.Work` for an in-progress assignment — that is expected, not a
+  sign of a misread file.
+- **Calendar arithmetic here exists to interpret stored spans, not to
+  compute new ones.** `Calendar.WorkMinutesBetween`/`NextWorkStart`/
+  `AdvanceByWork` turn a calendar's working days/hours into the same kind of
+  minute-level arithmetic MS Project's own scheduler uses internally, but
+  this reader only calls them to reconstruct what a *stored* timephased
+  span means (its per-hour rate, where a span's end actually falls) — it
+  does not use them to schedule or reschedule anything itself. A resource's
+  calendar wins over its task's when both apply; this reader does not
+  reproduce MS Project's further step of intersecting the two when a task
+  also carries its own explicit calendar.
+- **An MSPDI duration's display unit is guessed from its own text, not
+  read from a separate field.** `<Duration>PT24H0M0S</Duration>` carries no
+  unit tag of its own; MS Project (and this reader, matching it exactly)
+  picks the *largest* non-zero component the xsd:duration string itself
+  contains — hours here, since neither days, months nor years are set —
+  computes the value in that unit, and only then rescales it to the
+  field's own `DurationFormat` (or the project's default). A duration
+  expressed purely in elapsed clock time can therefore come out larger
+  than it looks: 24 real hours is 3 working days at 8 hours each, not 1.
+- **MSPDI custom Cost fields are scaled by 100; the built-in Cost fields
+  are not.** An `ExtendedAttribute` value for a Cost-typed custom field is
+  written in hundredths of a currency unit, the same convention the MPP
+  binary format uses everywhere — but a task or resource's own built-in
+  `<Cost>`/`<ActualCost>`/etc. elements are a plain decimal already. Mixing
+  the two conventions up gives an answer 100x off in one direction or the
+  other, so the two are deliberately handled by different code paths
+  rather than one field reader used for both.
+- **A document that declares a non-UTF-8 charset is read as Windows-1252,
+  not rejected.** Go's XML decoder refuses a declared encoding it doesn't
+  recognise unless a `CharsetReader` is supplied, and this project takes no
+  external dependencies to do that conversion properly; MSPDI files that
+  aren't UTF-8 are, in practice, essentially always Windows-1252 (an older
+  MS Project export convention), so that's the one encoding this reader
+  bothers to handle. A UTF-8-declared (or undeclared, XML's own default)
+  document never touches this path at all — encoding/xml only invokes a
+  CharsetReader for something other than UTF-8/US-ASCII in the first
+  place.
 
 ## License
 
