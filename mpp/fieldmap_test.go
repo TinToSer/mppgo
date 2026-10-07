@@ -21,19 +21,26 @@ func buildFieldMapEntry(dataBlockOffset, fullFieldID int) []byte {
 
 func TestParseFieldMap(t *testing.T) {
 	var buf bytes.Buffer
-	buf.Write(buildFieldMapEntry(4, taskFieldBase|taskFieldIDUniqueID))
 	buf.Write(buildFieldMapEntry(0, taskFieldBase|taskFieldIDID))
+	buf.Write(buildFieldMapEntry(4, taskFieldBase|taskFieldIDUniqueID))
 	buf.Write(buildFieldMapEntry(fieldMapNoFixedDataOffset, taskFieldBase|taskFieldIDLateStart)) // var-data only
+	buf.Write(buildFieldMapEntry(96, taskFieldBase|taskFieldIDStart))
+	// An offset lower than the previous one starts the next block.
+	buf.Write(buildFieldMapEntry(50, taskFieldBase|taskFieldIDScheduledStart))
 
 	fm := parseFieldMap(buf.Bytes())
-	if got, want := len(fm), 2; got != want {
+	if got, want := len(fm), 4; got != want {
 		t.Fatalf("len(fm) = %d, want %d (the var-data-only entry should be skipped)", got, want)
 	}
-	if got, want := fm[taskFieldBase|taskFieldIDUniqueID], 4; got != want {
-		t.Errorf("UNIQUE_ID offset = %d, want %d", got, want)
-	}
-	if got, want := fm[taskFieldBase|taskFieldIDID], 0; got != want {
-		t.Errorf("ID offset = %d, want %d", got, want)
+	for id, want := range map[int]fieldLocation{
+		taskFieldBase | taskFieldIDID:             {block: 0, offset: 0},
+		taskFieldBase | taskFieldIDUniqueID:       {block: 0, offset: 4},
+		taskFieldBase | taskFieldIDStart:          {block: 0, offset: 96},
+		taskFieldBase | taskFieldIDScheduledStart: {block: 1, offset: 50},
+	} {
+		if got := fm[id]; got != want {
+			t.Errorf("field %#x = %+v, want %+v", id, got, want)
+		}
 	}
 	if _, ok := fm[taskFieldBase|taskFieldIDLateStart]; ok {
 		t.Error("a var-data-only entry should not appear in the offset map")
@@ -49,15 +56,26 @@ func TestParseFieldMapIgnoresTrailingPartialRecord(t *testing.T) {
 }
 
 func TestFieldOffsetPrefersFileMapOverDefault(t *testing.T) {
-	fm := map[int]int{taskFieldBase | taskFieldIDUniqueID: 4}
+	fm := map[int]fieldLocation{
+		taskFieldBase | taskFieldIDUniqueID:       {block: 0, offset: 4},
+		taskFieldBase | taskFieldIDScheduledStart: {block: 1, offset: 50},
+	}
 
-	if got, want := fieldOffset(fm, taskFieldBase|taskFieldIDUniqueID, 0), 4; got != want {
+	if got, want := fieldOffset(fm, taskFieldBase|taskFieldIDUniqueID, 0, 0), 4; got != want {
 		t.Errorf("fieldOffset (present) = %d, want %d", got, want)
 	}
-	if got, want := fieldOffset(fm, taskFieldBase|taskFieldIDID, 4), 4; got != want {
-		t.Errorf("fieldOffset (absent, falls back to default) = %d, want %d", got, want)
+	if got, want := fieldOffset(fm, taskFieldBase|taskFieldIDScheduledStart, 1, 0), 50; got != want {
+		t.Errorf("fieldOffset (present in block 1) = %d, want %d", got, want)
 	}
-	if got, want := fieldOffset(nil, taskFieldBase|taskFieldIDUniqueID, 0), 0; got != want {
+	// A file map that does not place the field in the requested block must
+	// not fall back to the default: that offset holds some other field.
+	if got, want := fieldOffset(fm, taskFieldBase|taskFieldIDID, 0, 4), -1; got != want {
+		t.Errorf("fieldOffset (absent from map) = %d, want %d", got, want)
+	}
+	if got, want := fieldOffset(fm, taskFieldBase|taskFieldIDScheduledStart, 0, 54), -1; got != want {
+		t.Errorf("fieldOffset (other block) = %d, want %d", got, want)
+	}
+	if got, want := fieldOffset(nil, taskFieldBase|taskFieldIDUniqueID, 0, 0), 0; got != want {
 		t.Errorf("fieldOffset (nil map, falls back to default) = %d, want %d", got, want)
 	}
 }
@@ -67,7 +85,7 @@ func TestLoadFieldMapFallsBackToSecondKey(t *testing.T) {
 
 	props := ParseProps14(buildProps14([2]interface{}{taskFieldMapPropsKey2, entry}))
 	fm := loadFieldMap(props, taskFieldMapPropsKey1, taskFieldMapPropsKey2)
-	if got, want := fm[taskFieldBase|taskFieldIDUniqueID], 4; got != want {
+	if got, want := fm[taskFieldBase|taskFieldIDUniqueID].offset, 4; got != want {
 		t.Errorf("offset via key2 = %d, want %d", got, want)
 	}
 

@@ -21,19 +21,26 @@ general proprietary-format writer or a scheduling engine.
 
 | Area | MPP (binary) | MSPDI (XML) |
 | --- | --- | --- |
-| Project properties | Partial — title/metadata, file path, calendar, version, start/finish/status dates, scheduling factors | Partial — same core subset |
-| Calendars | Weekly patterns, hours, exceptions and inheritance; named work weeks are not modelled | Weekly patterns, hours, exceptions and inheritance; named work weeks are not modelled |
-| Tasks | Core fields — hierarchy, WBS, all four date pairs, duration, slack, work, cost, constraint, type, flags | Core fields — hierarchy (derived from OutlineLevel), dates, duration, work, cost, constraint, type |
-| Resources | Core fields — name, initials, type, group, rate, max units, work, cost, calendar | Core fields — same subset |
-| Assignments | Core fields — task/resource links, units, work, start/finish | Core fields — same subset |
+| All stored fields | Every task, resource and assignment field the file's field map locates (~1,900 field definitions), decoded into `Fields` by name | Typed fields below |
+| Project properties | Title/metadata (OLE summary properties preferred, as MS Project writes them), custom document properties, creation/saved dates, revision, GUID, scheduling defaults, currency, critical slack limit, week/fiscal year settings, baseline dates | Same, where MSPDI carries them |
+| Project summary task | `File.ProjectSummaryTask` (unique ID 0, project-wide rollups) | Same |
+| Calendars | Weekly patterns, hours, exceptions (recurring ones expanded per occurrence), work weeks, inheritance | Same |
+| Tasks | Hierarchy, WBS, all date pairs, duration (manual duration for manual tasks), slack incl. total slack, critical, estimated, task mode, stop/resume, work/cost incl. overtime and earned value, constraint, type, leveling, flags, hyperlink, contact, subproject/external markers, recurring-task pattern | Same typed fields (recurrence as a flag only: MSPDI stores no pattern) |
+| Resources | Identity, type, generic/budget, rates with their units, max/peak units, work/cost incl. actual, remaining and overtime, earned value, accrual, booking type, dates, hyperlink, calendar | Same |
+| Assignments | Links (incl. unassigned work), units, work/cost incl. actual, remaining and overtime, actual dates, stop/resume, delay, leveling delay, contour, rate table, earned value, flags, custom fields, hyperlink | Same |
 | Task dependencies | Complete — predecessors/successors, relation type, lag | Complete |
-| Notes | Complete — RTF stripped to plain text (`Notes`), original kept as `RTFNotes` | Complete — MSPDI stores notes as plain text already, so `RTFNotes` is always empty |
+| Notes | Complete — RTF stripped to plain text (`Notes`) honouring code pages, original kept as `RTFNotes` | Complete — MSPDI stores notes as plain text already, so `RTFNotes` is always empty |
 | Baselines | Complete — primary baseline plus Baseline1-10, for tasks, resources and assignments | Complete |
-| Custom fields | Text1-30, Number1-20, Date1-10, Duration1-10, Cost1-10, Flag1-20 and resolved Outline Code1-10 paths, with aliases | Text/Number/Date/Duration/Cost/Flag and aliases; full field IDs supported; outline/enterprise definitions remain unsupported |
+| Custom fields | Text1-30, Start1-10, Finish1-10, Number1-20, Date1-10, Duration1-10, Cost1-10, Flag1-20 (tasks, resources, assignments), lookup-table values, resolved Outline Code1-10 paths, with aliases | Same except outline codes; enterprise definitions unsupported |
 | Resource cost rate tables (A-E) | Supported | Supported |
 | Resource availability table | Supported | Supported |
-| Timephased data | Partial: planned/remaining work and baseline work/cost; actual work not decoded | Assignment remaining/actual/baseline work and baseline cost; raw assignment records, including unknown types, retained |
-| Write | Same-size verified template patches for advertised non-scheduling fields | Model-based schedule export; not a lossless source-document round trip |
+| Timephased data | Planned, actual (incl. irregular ranges) and actual overtime work; baseline work/cost for all 11 baselines | Assignment remaining/actual/actual overtime/baseline work and baseline cost; raw records, including unknown types, retained |
+| Write | Same-size verified template patches for advertised non-scheduling fields | Model-based schedule export in MSPDI schema order; not a lossless source-document round trip |
+
+Not read: views, tables, filters, groups and other display settings;
+blank (null) task rows; resource pools beyond the pool file name;
+enterprise custom field definitions; East Asian double-byte characters in
+RTF notes (shown as U+FFFD).
 
 Scope is MPP14 (Project 2010 through 365) plus MSPDI. Legacy MPP8/9/12 and
 the non-Microsoft formats MPXJ supports are out of scope.

@@ -71,6 +71,8 @@ func readTimephased(file *project.File, assignments *xmlAssignments, scale durat
 				assignment.TimephasedWork = append(assignment.TimephasedWork, period)
 			case 2:
 				assignment.TimephasedActualWork = append(assignment.TimephasedActualWork, period)
+			case 3:
+				assignment.TimephasedActualOvertimeWork = append(assignment.TimephasedActualOvertimeWork, period)
 			default:
 				if assignment.TimephasedBaselineWork == nil {
 					assignment.TimephasedBaselineWork = make(map[int][]project.TimephasedWork)
@@ -83,7 +85,7 @@ func readTimephased(file *project.File, assignments *xmlAssignments, scale durat
 
 func timephasedKind(kind int) (int, bool, bool) {
 	switch kind {
-	case 1, 2, 4:
+	case 1, 2, 3, 4:
 		return 0, false, true
 	case 5:
 		return 0, true, true
@@ -114,6 +116,7 @@ func writeTimephased(assignment *project.Assignment, scale durationScale) []xmlT
 	}
 	work(1, assignment.TimephasedWork)
 	work(2, assignment.TimephasedActualWork)
+	work(3, assignment.TimephasedActualOvertimeWork)
 	for baseline := 0; baseline <= 10; baseline++ {
 		workType, costType := 4, 5
 		if baseline > 0 {

@@ -159,6 +159,16 @@ func Read(r io.ReaderAt) (*project.File, error) {
 	// project settings read just above.
 	scale := newDurationScale(pf.Properties)
 	defaultDurationUnits := durationTimeUnits(projectProps.Short(propsDurationUnits), project.Days)
+	readProjectProperties(pf, projectProps, cf, defaultDurationUnits)
+
+	ctx := &readContext{
+		src:                src,
+		props:              projectProps,
+		version:            compObj.ApplicationVersion,
+		scale:              scale,
+		defaultUnits:       defaultDurationUnits,
+		criticalSlackLimit: float64(projectProps.Int(propsCriticalSlackLimit)),
+	}
 
 	calendars, resourceCalendars, err := readCalendars(src, projectDirPath, projectProps, compObj.ApplicationVersion)
 	if err != nil {
@@ -173,11 +183,11 @@ func Read(r io.ReaderAt) (*project.File, error) {
 		pf.DefaultCalendar = cal
 	}
 
-	aliases := readCustomFieldAliases(src, projectDirPath)
-	pf.CustomFieldAliases = map[int]string(aliases)
-	outlineCodeValues := readOutlineCodeValues(src, projectDirPath, compObj.ApplicationVersion)
+	ctx.aliases = readCustomFieldAliases(src, projectDirPath)
+	pf.CustomFieldAliases = map[int]string(ctx.aliases)
+	ctx.values, ctx.valuesByGUID = readOutlineCodeValues(ctx, projectDirPath)
 
-	resources, err := readResources(src, projectDirPath, projectProps, compObj.ApplicationVersion, scale, defaultDurationUnits, aliases, outlineCodeValues)
+	resources, err := readResources(ctx, projectDirPath)
 	if err != nil {
 		return nil, err
 	}
@@ -188,10 +198,11 @@ func Read(r io.ReaderAt) (*project.File, error) {
 		pf.AddResource(r)
 	}
 
-	tasks, err := readTasks(src, projectDirPath, projectProps, compObj.ApplicationVersion, scale, defaultDurationUnits, aliases, outlineCodeValues)
+	tasks, summary, err := readTasks(ctx, projectDirPath)
 	if err != nil {
 		return nil, err
 	}
+	pf.ProjectSummaryTask = summary
 	for _, t := range tasks {
 		pf.AddTask(t)
 	}
@@ -206,7 +217,7 @@ func Read(r io.ReaderAt) (*project.File, error) {
 		pf.AddRelation(r)
 	}
 
-	assignments, err := readAssignments(src, projectDirPath, projectProps, pf)
+	assignments, err := readAssignments(ctx, projectDirPath, pf)
 	if err != nil {
 		return nil, err
 	}

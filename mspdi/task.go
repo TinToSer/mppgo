@@ -12,50 +12,87 @@ type xmlTasks struct {
 }
 
 type xmlTask struct {
-	UID                 int                    `xml:"UID"`
-	ID                  int                    `xml:"ID"`
-	Name                string                 `xml:"Name"`
-	Active              *bool                  `xml:"Active"`
-	Type                int                    `xml:"Type"`
-	WBS                 string                 `xml:"WBS"`
-	OutlineLevel        int                    `xml:"OutlineLevel"`
-	Priority            int                    `xml:"Priority"`
-	Start               xmlDateTime            `xml:"Start"`
-	Finish              xmlDateTime            `xml:"Finish"`
-	Duration            string                 `xml:"Duration"`
-	DurationFormat      int                    `xml:"DurationFormat"`
-	Work                string                 `xml:"Work"`
-	ActualWork          string                 `xml:"ActualWork"`
-	RemainingWork       string                 `xml:"RemainingWork"`
-	Milestone           bool                   `xml:"Milestone"`
-	Summary             bool                   `xml:"Summary"`
-	EarlyStart          xmlDateTime            `xml:"EarlyStart"`
-	EarlyFinish         xmlDateTime            `xml:"EarlyFinish"`
-	LateStart           xmlDateTime            `xml:"LateStart"`
-	LateFinish          xmlDateTime            `xml:"LateFinish"`
-	FreeSlack           *int                   `xml:"FreeSlack"`
-	TotalSlack          *int                   `xml:"TotalSlack"`
-	StartSlack          *int                   `xml:"StartSlack"`
-	FinishSlack         *int                   `xml:"FinishSlack"`
-	FixedCost           float64                `xml:"FixedCost"`
-	PercentComplete     float64                `xml:"PercentComplete"`
-	PercentWorkComplete float64                `xml:"PercentWorkComplete"`
-	Cost                float64                `xml:"Cost"`
-	ActualStart         xmlDateTime            `xml:"ActualStart"`
-	ActualFinish        xmlDateTime            `xml:"ActualFinish"`
-	ActualDuration      string                 `xml:"ActualDuration"`
-	ActualCost          float64                `xml:"ActualCost"`
-	RemainingCost       float64                `xml:"RemainingCost"`
-	RemainingDuration   string                 `xml:"RemainingDuration"`
-	ConstraintType      *int                   `xml:"ConstraintType"`
-	CalendarUID         *int                   `xml:"CalendarUID"`
-	ConstraintDate      xmlDateTime            `xml:"ConstraintDate"`
-	Deadline            xmlDateTime            `xml:"Deadline"`
-	Notes               string                 `xml:"Notes"`
-	CreateDate          xmlDateTime            `xml:"CreateDate"`
-	PredecessorLink     []xmlPredecessorLink   `xml:"PredecessorLink"`
-	ExtendedAttribute   []xmlExtendedAttribute `xml:"ExtendedAttribute"`
-	Baseline            []xmlTaskBaseline      `xml:"Baseline"`
+	UID                     int                    `xml:"UID"`
+	GUID                    string                 `xml:"GUID,omitempty"`
+	ID                      int                    `xml:"ID"`
+	Name                    string                 `xml:"Name"`
+	Active                  *bool                  `xml:"Active"`
+	Manual                  bool                   `xml:"Manual"`
+	Type                    int                    `xml:"Type"`
+	CreateDate              xmlDateTime            `xml:"CreateDate"`
+	Contact                 string                 `xml:"Contact,omitempty"`
+	WBS                     string                 `xml:"WBS"`
+	OutlineLevel            int                    `xml:"OutlineLevel"`
+	Priority                int                    `xml:"Priority"`
+	Start                   xmlDateTime            `xml:"Start"`
+	Finish                  xmlDateTime            `xml:"Finish"`
+	Duration                string                 `xml:"Duration"`
+	ManualDuration          string                 `xml:"ManualDuration,omitempty"`
+	DurationFormat          int                    `xml:"DurationFormat"`
+	Work                    string                 `xml:"Work"`
+	Stop                    xmlDateTime            `xml:"Stop"`
+	Resume                  xmlDateTime            `xml:"Resume"`
+	EffortDriven            bool                   `xml:"EffortDriven"`
+	Recurring               bool                   `xml:"Recurring"`
+	Estimated               bool                   `xml:"Estimated"`
+	Milestone               bool                   `xml:"Milestone"`
+	Summary                 bool                   `xml:"Summary"`
+	Critical                bool                   `xml:"Critical"`
+	IsSubproject            bool                   `xml:"IsSubproject"`
+	IsSubprojectReadOnly    bool                   `xml:"IsSubprojectReadOnly"`
+	SubprojectName          string                 `xml:"SubprojectName,omitempty"`
+	ExternalTask            bool                   `xml:"ExternalTask"`
+	EarlyStart              xmlDateTime            `xml:"EarlyStart"`
+	EarlyFinish             xmlDateTime            `xml:"EarlyFinish"`
+	LateStart               xmlDateTime            `xml:"LateStart"`
+	LateFinish              xmlDateTime            `xml:"LateFinish"`
+	FreeSlack               *int                   `xml:"FreeSlack"`
+	TotalSlack              *int                   `xml:"TotalSlack"`
+	StartSlack              *int                   `xml:"StartSlack"`
+	FinishSlack             *int                   `xml:"FinishSlack"`
+	FixedCost               float64                `xml:"FixedCost"`
+	FixedCostAccrual        *int                   `xml:"FixedCostAccrual"`
+	PercentComplete         float64                `xml:"PercentComplete"`
+	PercentWorkComplete     float64                `xml:"PercentWorkComplete"`
+	Cost                    float64                `xml:"Cost"`
+	OvertimeCost            float64                `xml:"OvertimeCost"`
+	OvertimeWork            string                 `xml:"OvertimeWork,omitempty"`
+	ActualStart             xmlDateTime            `xml:"ActualStart"`
+	ActualFinish            xmlDateTime            `xml:"ActualFinish"`
+	ActualDuration          string                 `xml:"ActualDuration"`
+	ActualCost              float64                `xml:"ActualCost"`
+	ActualOvertimeCost      float64                `xml:"ActualOvertimeCost"`
+	ActualWork              string                 `xml:"ActualWork"`
+	ActualOvertimeWork      string                 `xml:"ActualOvertimeWork,omitempty"`
+	RegularWork             string                 `xml:"RegularWork,omitempty"`
+	RemainingDuration       string                 `xml:"RemainingDuration"`
+	RemainingCost           float64                `xml:"RemainingCost"`
+	RemainingWork           string                 `xml:"RemainingWork"`
+	RemainingOvertimeCost   float64                `xml:"RemainingOvertimeCost"`
+	RemainingOvertimeWork   string                 `xml:"RemainingOvertimeWork,omitempty"`
+	ACWP                    float64                `xml:"ACWP"`
+	ConstraintType          *int                   `xml:"ConstraintType"`
+	CalendarUID             *int                   `xml:"CalendarUID"`
+	ConstraintDate          xmlDateTime            `xml:"ConstraintDate"`
+	Deadline                xmlDateTime            `xml:"Deadline"`
+	LevelAssignments        bool                   `xml:"LevelAssignments"`
+	LevelingCanSplit        bool                   `xml:"LevelingCanSplit"`
+	LevelingDelay           *int                   `xml:"LevelingDelay"`
+	LevelingDelayFormat     int                    `xml:"LevelingDelayFormat,omitempty"`
+	Hyperlink               string                 `xml:"Hyperlink,omitempty"`
+	HyperlinkAddress        string                 `xml:"HyperlinkAddress,omitempty"`
+	HyperlinkSubAddress     string                 `xml:"HyperlinkSubAddress,omitempty"`
+	IgnoreResourceCalendar  bool                   `xml:"IgnoreResourceCalendar"`
+	Notes                   string                 `xml:"Notes"`
+	HideBar                 bool                   `xml:"HideBar"`
+	Rollup                  bool                   `xml:"Rollup"`
+	BCWS                    float64                `xml:"BCWS"`
+	BCWP                    float64                `xml:"BCWP"`
+	PhysicalPercentComplete float64                `xml:"PhysicalPercentComplete"`
+	EarnedValueMethod       int                    `xml:"EarnedValueMethod"`
+	PredecessorLink         []xmlPredecessorLink   `xml:"PredecessorLink"`
+	ExtendedAttribute       []xmlExtendedAttribute `xml:"ExtendedAttribute"`
+	Baseline                []xmlTaskBaseline      `xml:"Baseline"`
 }
 
 type xmlPredecessorLink struct {
@@ -100,18 +137,25 @@ func taskType(code int) project.TaskType {
 // one's ParentUniqueID from the OutlineLevel sequence — MSPDI, unlike the
 // MPP binary format, does not store a parent unique ID directly, only the
 // flat document-order list with each task's outline depth.
-func readTasks(xt *xmlTasks, scale durationScale, defaultUnits project.TimeUnit) []*project.Task {
+func readTasks(xt *xmlTasks, scale durationScale, defaultUnits project.TimeUnit) (tasks []*project.Task, summary *project.Task) {
 	if xt == nil {
-		return nil
+		return nil, nil
 	}
 
-	tasks := make([]*project.Task, 0, len(xt.Task))
+	tasks = make([]*project.Task, 0, len(xt.Task))
 	byUID := make(map[int]*project.Task, len(xt.Task))
 
 	// stack[i] is the most recently seen task at outline level i+1.
 	var stack []*project.Task
 
 	for _, x := range xt.Task {
+		// UID 0 is the project summary task MS Project writes at outline
+		// level 0. Like the MPP reader, keep it apart from Tasks: it is
+		// not part of the outline.
+		if x.UID == 0 {
+			summary = readTask(x, scale, defaultUnits)
+			continue
+		}
 		t := readTask(x, scale, defaultUnits)
 
 		level := x.OutlineLevel
@@ -138,7 +182,7 @@ func readTasks(xt *xmlTasks, scale durationScale, defaultUnits project.TimeUnit)
 		}
 	}
 
-	return tasks
+	return tasks, summary
 }
 
 func readTask(x xmlTask, scale durationScale, defaultUnits project.TimeUnit) *project.Task {
@@ -159,6 +203,49 @@ func readTask(x xmlTask, scale durationScale, defaultUnits project.TimeUnit) *pr
 		ActualCost:          x.ActualCost,
 		RemainingCost:       x.RemainingCost,
 		Inactive:            x.Active != nil && !*x.Active,
+
+		GUID:                    x.GUID,
+		Manual:                  x.Manual,
+		Contact:                 x.Contact,
+		Stop:                    x.Stop.Time,
+		Resume:                  x.Resume.Time,
+		EffortDriven:            x.EffortDriven,
+		Estimated:               x.Estimated,
+		Critical:                x.Critical,
+		SubprojectFile:          x.SubprojectName,
+		SubprojectReadOnly:      x.IsSubprojectReadOnly,
+		External:                x.ExternalTask,
+		FixedCostAccrual:        accrueName(intOrZero(x.FixedCostAccrual)),
+		OvertimeCost:            x.OvertimeCost,
+		ActualOvertimeCost:      x.ActualOvertimeCost,
+		RemainingOvertimeCost:   x.RemainingOvertimeCost,
+		ACWP:                    x.ACWP,
+		BCWS:                    x.BCWS,
+		BCWP:                    x.BCWP,
+		LevelAssignments:        x.LevelAssignments,
+		LevelingCanSplit:        x.LevelingCanSplit,
+		Hyperlink:               x.Hyperlink,
+		HyperlinkAddress:        x.HyperlinkAddress,
+		HyperlinkSubAddress:     x.HyperlinkSubAddress,
+		IgnoreResourceCalendar:  x.IgnoreResourceCalendar,
+		HideBar:                 x.HideBar,
+		Rollup:                  x.Rollup,
+		PhysicalPercentComplete: x.PhysicalPercentComplete,
+		EarnedValueMethod:       earnedValueMethodName(x.EarnedValueMethod),
+	}
+	if x.Recurring {
+		t.Recurrence = &project.RecurringTask{}
+	}
+	for _, w := range []struct {
+		dst *project.Duration
+		src string
+	}{
+		{&t.OvertimeWork, x.OvertimeWork}, {&t.ActualOvertimeWork, x.ActualOvertimeWork},
+		{&t.RegularWork, x.RegularWork}, {&t.RemainingOvertimeWork, x.RemainingOvertimeWork},
+	} {
+		if d, ok := parseDuration(scale, w.src, project.Hours); ok {
+			*w.dst = d
+		}
 	}
 
 	if x.Start.Valid {
@@ -197,7 +284,8 @@ func readTask(x xmlTask, scale durationScale, defaultUnits project.TimeUnit) *pr
 	if x.ConstraintType != nil {
 		t.ConstraintType = project.ConstraintType(*x.ConstraintType)
 	}
-	if x.CalendarUID != nil {
+	// -1 is MSPDI's "no task calendar"; the model uses 0 for that.
+	if x.CalendarUID != nil && *x.CalendarUID > 0 {
 		t.CalendarUniqueID = *x.CalendarUID
 	}
 
@@ -225,6 +313,15 @@ func readTask(x xmlTask, scale durationScale, defaultUnits project.TimeUnit) *pr
 	// xsd:duration string, sharing the task's own duration format.
 	if x.FreeSlack != nil {
 		t.FreeSlack = scale.tenthsToDuration(*x.FreeSlack, durationUnit)
+	}
+	if x.TotalSlack != nil {
+		t.TotalSlack = scale.tenthsToDuration(*x.TotalSlack, durationUnit)
+	}
+	if x.LevelingDelay != nil {
+		t.LevelingDelay = scale.tenthsToDuration(*x.LevelingDelay, mspdiDurationUnit(x.LevelingDelayFormat, project.Days))
+	}
+	if d, ok := parseDuration(scale, x.ManualDuration, durationUnit); ok {
+		t.ManualDuration = d
 	}
 	if x.StartSlack != nil {
 		t.StartSlack = scale.tenthsToDuration(*x.StartSlack, durationUnit)
@@ -306,6 +403,13 @@ func readPredecessors(f *project.File, xt *xmlTasks, scale durationScale) {
 			})
 		}
 	}
+}
+
+func earnedValueMethodName(code int) string {
+	if code == 1 {
+		return "Physical % Complete"
+	}
+	return "% Complete"
 }
 
 func intOrZero(p *int) int {

@@ -3,8 +3,11 @@ package mpp
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"testing"
+
+	"github.com/tintoser/mppgo/project"
 )
 
 func TestNativeVariableWrite(t *testing.T) {
@@ -76,5 +79,55 @@ func TestPatchMPPRealFile(t *testing.T) {
 	}
 	if _, err := Patch(original, []NativeEdit{{Entity: "tasks", UniqueID: task.UniqueID, Field: "start", Value: "2026-10-07"}}); err == nil {
 		t.Fatal("must reject unsupported scheduling edits")
+	}
+}
+
+// Text edits round-trip through a real file: the read-back verification
+// compares the whole model, decoded Fields included.
+func TestPatchMPPRealFileText(t *testing.T) {
+	original, err := os.ReadFile("../testdata/sample.mpp")
+	if os.IsNotExist(err) {
+		t.Skip("real MPP fixture is not present")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := Read(bytes.NewReader(original))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var task, custom *project.Task
+	var textField string
+	for _, candidate := range file.Tasks {
+		if task == nil && len(candidate.Name) > 3 {
+			task = candidate
+		}
+		for n := 1; n <= 30 && custom == nil; n++ {
+			name := fmt.Sprintf("Text%d", n)
+			if v, _ := candidate.Fields[name].(string); len(v) > 1 {
+				custom, textField = candidate, name
+			}
+		}
+	}
+	if task == nil || custom == nil {
+		t.Skip("fixture lacks an editable name or text field")
+	}
+	edits := []NativeEdit{
+		{Entity: "tasks", UniqueID: task.UniqueID, Field: "name", Value: task.Name[:3]},
+		{Entity: "tasks", UniqueID: custom.UniqueID, Field: "custom_fields." + textField, Value: "X"},
+	}
+	patched, err := Patch(original, edits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Read(bytes.NewReader(patched))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.TaskByID(task.UniqueID).Name; got != task.Name[:3] {
+		t.Errorf("name = %q, want %q", got, task.Name[:3])
+	}
+	if got := result.TaskByID(custom.UniqueID).Fields[textField]; got != "X" {
+		t.Errorf("%s = %#v, want \"X\"", textField, got)
 	}
 }

@@ -14,11 +14,26 @@ from the reverse engineering work of the MPXJ project:
     Copyright (c) Packwood Software
     Licensed under the GNU Lesser General Public License v2.1 or later
 
-MPXJ's Java source was read as the reference for understanding the format.
-No MPXJ source code was copied into this project; the Go implementation here
-was written independently against that understanding. Nonetheless, the
-format knowledge that makes this library possible is MPXJ's contribution,
-and that debt is acknowledged here explicitly.
+MPXJ's Java source was read as the reference for understanding the format,
+and parts of this library follow it closely:
+
+  - mpp/fielddefs_gen.go is generated from MPXJ's MPP field tables
+    (MPPTaskField, MPPResourceField, MPPAssignmentField and the data types
+    in TaskField, ResourceField and AssignmentField): field indexes, names
+    and data types.
+  - The decoding of actual (complete) timephased work, including the
+    splicing of irregular work ranges (mpp/timephased.go), is a Go
+    translation of MPXJ's TimephasedDataFactory.getCompleteWork and
+    splitItem.
+  - Field-map decoding, lookup-table values, recurring calendar exceptions,
+    work weeks, recurring tasks, hyperlinks, bit-flag positions and the
+    project property keys follow the corresponding MPXJ readers.
+
+The rest of the Go implementation was written independently against that
+understanding. Either way, the format knowledge that makes this library
+possible is MPXJ's contribution, and that debt is acknowledged here
+explicitly. MPXJ is licensed under the LGPL; whether the parts above are
+derived works for licensing purposes has not been assessed here.
 
 If you need broad, production-grade Microsoft Project support today —
 including MPP8/9/12, Primavera, Asta, Planner and many other formats — use

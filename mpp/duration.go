@@ -119,6 +119,34 @@ func (s durationScale) duration(raw int, units project.TimeUnit) project.Duratio
 	return project.Duration{Amount: amount, Units: units}
 }
 
+// minutes converts a duration back to minutes, the inverse of duration().
+// Percentages have no length in time and convert to 0.
+func (s durationScale) minutes(d project.Duration) float64 {
+	switch d.Units {
+	case project.Minutes, project.ElapsedMinutes:
+		return d.Amount
+	case project.Hours, project.ElapsedHours:
+		return d.Amount * 60
+	case project.Days:
+		return d.Amount * s.minutesPerDay
+	case project.ElapsedDays:
+		return d.Amount * 24 * 60
+	case project.Weeks:
+		return d.Amount * s.minutesPerWeek
+	case project.ElapsedWeeks:
+		return d.Amount * 7 * 24 * 60
+	case project.Months:
+		return d.Amount * s.minutesPerDay * s.daysPerMonth
+	case project.ElapsedMonths:
+		return d.Amount * 30 * 24 * 60
+	case project.Years:
+		return d.Amount * s.minutesPerWeek * 52
+	case project.ElapsedYears:
+		return d.Amount * 365 * 24 * 60
+	}
+	return 0
+}
+
 // workTimeUnit decodes the "rate format" code used by cost rate tables and
 // a handful of other WORK_UNITS-typed fields: a 1-based index into MPXJ's
 // TimeUnit ordinals, which — unlike this reader's own project.TimeUnit

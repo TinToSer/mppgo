@@ -40,10 +40,25 @@ func (e *CalendarException) Working() bool { return len(e.Ranges) > 0 }
 
 // Covers reports whether the exception applies to the given date.
 func (e *CalendarException) Covers(date time.Time) bool {
-	d := truncateToDay(date)
-	from := truncateToDay(e.FromDate)
-	to := truncateToDay(e.ToDate)
-	return !d.Before(from) && !d.After(to)
+	return e.coversDay(dayKey(date))
+}
+
+func (e *CalendarException) coversDay(day int64) bool {
+	return day >= dayKey(e.FromDate) && day <= dayKey(e.ToDate)
+}
+
+// dayKey numbers calendar dates consecutively (days since 1970-01-01), each
+// read in its own time's location. Exception lookups run once per day
+// scanned for every exception in the calendar chain, so this avoids the
+// cost of a full calendar-date conversion on that hot path.
+func dayKey(t time.Time) int64 {
+	_, offset := t.Zone()
+	seconds := t.Unix() + int64(offset)
+	day := seconds / 86400
+	if seconds%86400 < 0 {
+		day--
+	}
+	return day
 }
 
 func truncateToDay(t time.Time) time.Time {
@@ -66,6 +81,31 @@ type Calendar struct {
 	Days       map[time.Weekday]DayType
 	Hours      map[time.Weekday][]TimeRange
 	Exceptions []*CalendarException
+
+	// WorkWeeks are named weekly patterns that replace this calendar's
+	// default week for a date range. Days a work week leaves as DayDefault
+	// follow the default week.
+	WorkWeeks []*WorkWeek
+}
+
+// WorkWeek is a weekly working pattern in force for a date range.
+type WorkWeek struct {
+	Name     string
+	FromDate time.Time
+	ToDate   time.Time
+	Days     map[time.Weekday]DayType
+	Hours    map[time.Weekday][]TimeRange
+}
+
+// NewWorkWeek creates a work week with every day set to DayDefault.
+func NewWorkWeek() *WorkWeek {
+	return &WorkWeek{Days: make(map[time.Weekday]DayType), Hours: make(map[time.Weekday][]TimeRange)}
+}
+
+// Covers reports whether the work week applies to the given date.
+func (w *WorkWeek) Covers(date time.Time) bool {
+	day := dayKey(date)
+	return day >= dayKey(w.FromDate) && day <= dayKey(w.ToDate)
 }
 
 // NewCalendar creates an empty calendar with every day set to DayDefault.
@@ -122,9 +162,10 @@ func (c *Calendar) HoursFor(day time.Weekday) []TimeRange {
 // exceptionFor finds the exception covering a date, searching this calendar
 // then its ancestors. Later exceptions win over earlier ones.
 func (c *Calendar) exceptionFor(date time.Time) *CalendarException {
+	day := dayKey(date)
 	for cal, depth := c, 0; cal != nil && depth < 32; cal, depth = cal.Parent, depth+1 {
 		for i := len(cal.Exceptions) - 1; i >= 0; i-- {
-			if cal.Exceptions[i].Covers(date) {
+			if cal.Exceptions[i].coversDay(day) {
 				return cal.Exceptions[i]
 			}
 		}
@@ -132,20 +173,44 @@ func (c *Calendar) exceptionFor(date time.Time) *CalendarException {
 	return nil
 }
 
+// workWeekFor finds the work week covering a date, searching this calendar
+// then its ancestors.
+func (c *Calendar) workWeekFor(date time.Time) *WorkWeek {
+	day := dayKey(date)
+	for cal, depth := c, 0; cal != nil && depth < 32; cal, depth = cal.Parent, depth+1 {
+		for _, w := range cal.WorkWeeks {
+			if day >= dayKey(w.FromDate) && day <= dayKey(w.ToDate) {
+				return w
+			}
+		}
+	}
+	return nil
+}
+
 // WorkingOn reports whether a specific date is worked, taking calendar
-// exceptions into account as well as the weekly pattern.
+// exceptions and work weeks into account as well as the weekly pattern.
 func (c *Calendar) WorkingOn(date time.Time) bool {
 	if exc := c.exceptionFor(date); exc != nil {
 		return exc.Working()
+	}
+	if w := c.workWeekFor(date); w != nil && w.Days[date.Weekday()] != DayDefault {
+		return w.Days[date.Weekday()] == DayWorking
 	}
 	return c.IsWorkingDay(date.Weekday())
 }
 
 // HoursOn returns the working periods for a specific date, taking calendar
-// exceptions into account. Returns nil if the date is not worked.
+// exceptions and work weeks into account. Returns nil if the date is not
+// worked.
 func (c *Calendar) HoursOn(date time.Time) []TimeRange {
 	if exc := c.exceptionFor(date); exc != nil {
 		return exc.Ranges
+	}
+	if w := c.workWeekFor(date); w != nil && w.Days[date.Weekday()] != DayDefault {
+		if w.Days[date.Weekday()] != DayWorking {
+			return nil
+		}
+		return w.Hours[date.Weekday()]
 	}
 	return c.HoursFor(date.Weekday())
 }

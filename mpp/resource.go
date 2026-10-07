@@ -177,7 +177,9 @@ func resourceType(metaData, metaData2 []byte, applicationVersion int) project.Re
 // defines. Each resource's CalendarUniqueID is filled in by the caller from
 // the resourceCalendars map readCalendars already produced, since MS
 // Project links a resource to its calendar there rather than in TBkndRsc.
-func readResources(src *streamSource, projectDirPath string, projectProps *Props, applicationVersion int, scale durationScale, defaultUnits project.TimeUnit, aliases customFieldAliases, outlineCodeValues map[int]outlineCodeValue) ([]*project.Resource, error) {
+func readResources(ctx *readContext, projectDirPath string) ([]*project.Resource, error) {
+	src, projectProps, applicationVersion := ctx.src, ctx.props, ctx.version
+	scale, aliases := ctx.scale, ctx.aliases
 	dir := projectDirPath + "/TBkndRsc"
 
 	varMetaRaw, err := src.plain(dir + "/VarMeta")
@@ -211,17 +213,23 @@ func readResources(src *streamSource, projectDirPath string, projectProps *Props
 	// Fixed2Meta carries the flag separating cost resources from material
 	// ones. It is optional; without it such resources read as material.
 	var fixed2Meta *FixedMeta
+	var fixed2Data *FixedData
 	if src.has(dir + "/Fixed2Meta") {
 		if raw, err := src.plain(dir + "/Fixed2Meta"); err == nil {
 			if meta2, err := ParseFixedMetaHeuristic(raw, fixedData.ItemCount(), 50, 51); err == nil {
 				fixed2Meta = meta2
+				if raw2, err := src.decoded(dir + "/Fixed2Data"); err == nil {
+					fixed2Data = ParseFixedData(meta2, raw2, 0, 0)
+				}
 			}
 		}
 	}
+	decoder := newFieldDecoder(ctx, resourceFieldDefs, fieldMapData(projectProps, resourceFieldMapPropsKey1, resourceFieldMapPropsKey2))
+	flags := resourceFlags(applicationVersion, fixed2Meta)
 
 	fm := loadFieldMap(projectProps, resourceFieldMapPropsKey1, resourceFieldMapPropsKey2)
 	off := func(fieldID, defaultOffset int) int {
-		return fieldOffset(fm, resourceFieldBase|fieldID, defaultOffset)
+		return fieldOffset(fm, resourceFieldBase|fieldID, 0, defaultOffset)
 	}
 	offUniqueID := off(resourceFieldIDUniqueID, resourceDefaultOffsetUniqueID)
 	offID := off(resourceFieldIDID, resourceDefaultOffsetID)
@@ -231,8 +239,6 @@ func readResources(src *streamSource, projectDirPath string, projectProps *Props
 	offCostPerUse := off(resourceFieldIDCostPerUse, resourceDefaultOffsetCostPerUse)
 	offWork := off(resourceFieldIDWork, resourceDefaultOffsetWork)
 	offCost := off(resourceFieldIDCost, resourceDefaultOffsetCost)
-	offBaselineWork := off(resourceFieldIDBaselineWork, resourceDefaultOffsetBaselineWork)
-	offBaselineCost := off(resourceFieldIDBaselineCost, resourceDefaultOffsetBaselineCost)
 	// A record only has to be long enough to identify the resource. The
 	// optional fields below are read through bounds-safe accessors, so a
 	// short record yields a resource with those left at zero rather than
@@ -254,8 +260,10 @@ func readResources(src *streamSource, projectDirPath string, projectProps *Props
 			continue
 		}
 
+		// A resource with no var data at all is a phantom record left by a
+		// delete; MPXJ reads only resources present in VarMeta too.
 		uniqueID := getInt(rec, offUniqueID)
-		if uniqueID <= 0 || seen[uniqueID] {
+		if uniqueID <= 0 || seen[uniqueID] || len(varMeta.Types(uniqueID)) == 0 {
 			continue
 		}
 		seen[uniqueID] = true
@@ -288,8 +296,17 @@ func readResources(src *streamSource, projectDirPath string, projectProps *Props
 			r.Notes = stripRTF(rtf)
 		}
 
-		baselineWork := getWork(rec, offBaselineWork)
-		baselineCost := getCurrency(rec, offBaselineCost)
+		var rec2 []byte
+		if fixed2Data != nil {
+			rec2 = fixed2Data.ByteArrayValue(i)
+		}
+		r.Fields = decoder.decode([][]byte{rec, rec2}, varData, uniqueID)
+		applyResourceFields(r, r.Fields, metaData2, flags, varData)
+
+		// Baseline Work/Cost are fixed data in some files and var data in
+		// others; the decoded fields cover both.
+		baselineWork := fieldDuration(r.Fields, "BaselineWork")
+		baselineCost := fieldFloat(r.Fields, "BaselineCost")
 		if baselineWork.Amount != 0 || baselineCost != 0 {
 			r.Baseline = &project.Baseline{Work: baselineWork, Cost: baselineCost}
 		}
@@ -302,12 +319,17 @@ func readResources(src *streamSource, projectDirPath string, projectProps *Props
 			}
 		}
 
-		r.CustomFields = addResourceFlags(readResourceCustomFields(varData, uniqueID, aliases, scale, defaultUnits, outlineCodeValues), metaData, flagBits, aliases)
+		r.CustomFields = addResourceFlags(customFields(r.Fields, resourceFieldBase, resourceFieldIndex, aliases), metaData, flagBits, aliases)
+		r.CustomFields = addOutlineCodes(r.CustomFields, varData, uniqueID, resourceFieldBase, resourceOutlineCodeIndexVarKeys, aliases, ctx.values)
 
 		for table := 0; table < 5; table++ {
 			data := varData.ByteArray(uniqueID, resourceCostRateAVarType+table)
 			r.CostRateTables[table] = readResourceCostRateTable(data, table, r.StandardRate, r.OvertimeRate, r.CostPerUse, scale)
 		}
+		// The rate fields are stored per hour; MS Project shows them in
+		// their own rate units, as the cost rate tables already are.
+		r.StandardRate = scale.rate(r.StandardRate, r.StandardRateUnits)
+		r.OvertimeRate = scale.rate(r.OvertimeRate, r.OvertimeRateUnits)
 		r.Availability = readResourceAvailability(varData.ByteArray(uniqueID, resourceAvailabilityVarType))
 
 		resources = append(resources, r)
@@ -344,55 +366,6 @@ func readResourceBaseline(varData *Var2Data, uniqueID int, k resourceBaselineVar
 		return nil
 	}
 	return b
-}
-
-// readResourceCustomFields collects the resource's generic custom fields
-// (Text1-30, Number1-20, Date1-10, Duration1-10, Cost1-10) into the map
-// exposed as Resource.CustomFields. See readTaskCustomFields for the same
-// logic on the task side.
-func readResourceCustomFields(varData *Var2Data, uniqueID int, aliases customFieldAliases, scale durationScale, defaultUnits project.TimeUnit, outlineCodeValues map[int]outlineCodeValue) map[string]interface{} {
-	fields := make(map[string]interface{})
-
-	for i, key := range resourceTextVarKeys {
-		if v := varData.UnicodeString(uniqueID, key); v != "" {
-			fields[aliases.name(resourceFieldBase|key, fmt.Sprintf("Text%d", i+1))] = v
-		}
-	}
-	for i, key := range resourceNumberVarKeys {
-		if varData.Has(uniqueID, key) {
-			fields[aliases.name(resourceFieldBase|key, fmt.Sprintf("Number%d", i+1))] = varData.Double(uniqueID, key)
-		}
-	}
-	for i, key := range resourceDateVarKeys {
-		if d, ok := varData.Timestamp(uniqueID, key); ok {
-			fields[aliases.name(resourceFieldBase|key, fmt.Sprintf("Date%d", i+1))] = d
-		}
-	}
-	for i, key := range resourceCostVarKeys {
-		if varData.Has(uniqueID, key) {
-			fields[aliases.name(resourceFieldBase|key, fmt.Sprintf("Cost%d", i+1))] = customFieldCurrency(varData.Double(uniqueID, key))
-		}
-	}
-	for i, keys := range resourceDurationVarKeys {
-		valueKey, unitsKey := keys[0], keys[1]
-		if varData.Has(uniqueID, valueKey) {
-			units := durationTimeUnits(varData.Short(uniqueID, unitsKey), defaultUnits)
-			fields[aliases.name(resourceFieldBase|valueKey, fmt.Sprintf("Duration%d", i+1))] = scale.duration(varData.Int(uniqueID, valueKey), units)
-		}
-	}
-	for i, key := range resourceOutlineCodeIndexVarKeys {
-		if !varData.Has(uniqueID, key) {
-			continue
-		}
-		if path := resolveOutlineCodePath(outlineCodeValues, varData.Int(uniqueID, key)); path != "" {
-			fields[aliases.name(resourceFieldBase|(key-1), fmt.Sprintf("Outline Code%d", i+1))] = path
-		}
-	}
-
-	if len(fields) == 0 {
-		return nil
-	}
-	return fields
 }
 
 // addResourceFlags merges any set Flag1..Flag20 bits into a resource's
@@ -534,3 +507,57 @@ func readResourceAvailability(data []byte) []project.AvailabilityEntry {
 // resourceAvailabilityStartNA is MPXJ's sentinel for "no lower bound" in an
 // availability table entry's start date. See costRateEndDateNA.
 var resourceAvailabilityStartNA = time.Date(1984, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// resourceHyperlinkVarType is the var-data key of a resource's hyperlink block.
+const resourceHyperlinkVarType = 136
+
+// resourceMetaFlags are the resource bit flags in Fixed2Meta outside the
+// field map (MPXJ's resource META_DATA2 flags). Project 2013+ moved the
+// Generic bit depending on the record size.
+type resourceMetaFlags struct {
+	budget, generic metaFlag
+}
+
+func resourceFlags(applicationVersion int, fixed2Meta *FixedMeta) resourceMetaFlags {
+	if applicationVersion <= appVersionProject2010 {
+		return resourceMetaFlags{budget: metaFlag{8, 0x20}, generic: metaFlag{32, 0x04000000}}
+	}
+	if fixed2Meta != nil && len(fixed2Meta.ByteArrayValue(0)) == 51 {
+		return resourceMetaFlags{budget: metaFlag{8, 0x40}, generic: metaFlag{32, -0x80000000}}
+	}
+	return resourceMetaFlags{budget: metaFlag{8, 0x40}, generic: metaFlag{32, 0x10000000}}
+}
+
+// applyResourceFields fills the typed resource fields that come from the
+// decoded field map and the meta-data flags.
+func applyResourceFields(r *project.Resource, f map[string]interface{}, meta2 []byte, flags resourceMetaFlags, varData *Var2Data) {
+	r.GUID = fieldString(f, "GUID")
+	r.CanLevel = fieldBool(f, "CanLevel")
+	r.AccrueAt = fieldString(f, "AccrueAt")
+	r.Phonetics = fieldString(f, "Phonetics")
+	r.NTAccount = fieldString(f, "WindowsUserAccount")
+	r.MaterialLabel = fieldString(f, "MaterialLabel")
+	r.BookingType = fieldString(f, "BookingType")
+	r.StandardRateUnits = fieldUnit(f, "StandardRateUnits", project.Hours)
+	r.OvertimeRateUnits = fieldUnit(f, "OvertimeRateUnits", project.Hours)
+	r.PeakUnits = fieldFloat(f, "Peak")
+	r.RegularWork = fieldDuration(f, "RegularWork")
+	r.ActualWork = fieldDuration(f, "ActualWork")
+	r.RemainingWork = fieldDuration(f, "RemainingWork")
+	r.OvertimeWork = fieldDuration(f, "OvertimeWork")
+	r.ActualOvertimeWork = fieldDuration(f, "ActualOvertimeWork")
+	r.ActualCost = fieldFloat(f, "ActualCost")
+	r.RemainingCost = fieldFloat(f, "RemainingCost")
+	r.OvertimeCost = fieldFloat(f, "OvertimeCost")
+	r.BCWS = fieldFloat(f, "BCWS")
+	r.BCWP = fieldFloat(f, "BCWP")
+	r.ACWP = fieldFloat(f, "ACWP")
+	r.Start = fieldTime(f, "Start")
+	r.Finish = fieldTime(f, "Finish")
+	r.AvailableFrom = fieldTime(f, "AvailableFrom")
+	r.AvailableTo = fieldTime(f, "AvailableTo")
+	r.Created = fieldTime(f, "Created")
+	r.Budget = meta2 != nil && flags.budget.set(meta2)
+	r.Generic = meta2 != nil && flags.generic.set(meta2)
+	r.Hyperlink, r.HyperlinkAddress, r.HyperlinkSubAddress, r.HyperlinkScreenTip = readHyperlink(varData.ByteArray(r.UniqueID, resourceHyperlinkVarType))
+}

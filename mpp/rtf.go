@@ -27,8 +27,10 @@ func stripRTF(text string) string {
 	}
 
 	type groupState struct {
-		skip   bool // suppress text output while inside this group
-		ucSkip int  // \ucN: ASCII fallback character count following a \u escape
+		skip      bool // suppress text output while inside this group
+		ucSkip    int  // \ucN: ASCII fallback character count following a \u escape
+		font      int  // current \fN, which selects the code page of \'hh escapes
+		fontTable bool // inside {\fonttbl}, where \fN defines rather than selects
 	}
 
 	runes := []rune(text)
@@ -37,8 +39,11 @@ func stripRTF(text string) string {
 
 	var out []rune
 	var stack []groupState
-	cur := groupState{ucSkip: 1}
+	cur := groupState{ucSkip: 1, font: -1}
 	pendingSkip := 0 // remaining \u fallback characters to swallow, not emit
+	ansiCodePage := 1252
+	fontCodePages := make(map[int]int) // \fN -> code page, from \fcharset
+	definingFont := -1
 
 	emit := func(r rune) {
 		if pendingSkip > 0 {
@@ -113,7 +118,11 @@ func stripRTF(text string) string {
 				i++
 				if i+2 <= n {
 					if v, err := strconv.ParseInt(string(runes[i:i+2]), 16, 32); err == nil {
-						emit(cp1252ToRune(byte(v)))
+						codePage := ansiCodePage
+						if cp, ok := fontCodePages[cur.font]; ok {
+							codePage = cp
+						}
+						emit(codePageRune(byte(v), codePage))
 					}
 					i += 2
 				}
@@ -161,6 +170,24 @@ func stripRTF(text string) string {
 					if hasParam {
 						cur.ucSkip = param
 					}
+				case "ansicpg":
+					if hasParam {
+						ansiCodePage = param
+					}
+				case "f":
+					if hasParam {
+						if cur.fontTable {
+							definingFont = param
+						} else {
+							cur.font = param
+						}
+					}
+				case "fcharset":
+					if hasParam && cur.fontTable && definingFont >= 0 {
+						if cp, ok := charsetCodePages[param]; ok {
+							fontCodePages[definingFont] = cp
+						}
+					}
 				case "u":
 					if hasParam {
 						cp := param
@@ -184,6 +211,9 @@ func stripRTF(text string) string {
 					if rtfIgnorableDestinations[word] {
 						cur.skip = true
 					}
+					if word == "fonttbl" {
+						cur.fontTable = true
+					}
 				}
 			}
 
@@ -204,11 +234,42 @@ var rtfIgnorableDestinations = map[string]bool{
 	"generator": true, "pict": true, "object": true, "objdata": true,
 	"header": true, "headerf": true, "headerl": true, "headerr": true,
 	"footer": true, "footerf": true, "footerl": true, "footerr": true,
-	"footnote": true, "annotation": true, "field": true, "fldinst": true,
+	"footnote": true, "annotation": true, "fldinst": true,
 	"nonshppict": true, "themedata": true, "colorschememapping": true,
 	"datastore": true, "listtable": true, "listoverridetable": true,
 	"rsidtbl": true, "xmlnstbl": true, "revtbl": true, "panose": true,
 	"falt": true, "latentstyles": true, "template": true,
+}
+
+// charsetCodePages maps an RTF \fcharset value to its Windows code page.
+// A charset not listed (ANSI, default, symbol) uses the document's
+// \ansicpg.
+var charsetCodePages = map[int]int{
+	128: 932, 129: 949, 134: 936, 136: 950, // double-byte
+	161: 1253, 162: 1254, 163: 1258, 177: 1255, 178: 1256, 186: 1257,
+	204: 1251, 222: 874, 238: 1250,
+}
+
+// codePageRune decodes one \'hh byte in the given Windows code page.
+// Double-byte (East Asian) code pages are not decoded: their bytes come in
+// pairs this reader has no tables for, so each becomes U+FFFD rather than
+// a wrong Latin letter.
+func codePageRune(b byte, codePage int) rune {
+	if b < 0x80 {
+		return rune(b)
+	}
+	switch codePage {
+	case 932, 936, 949, 950:
+		return '\uFFFD'
+	}
+	table, ok := codePages[codePage]
+	if !ok {
+		table = codePages[1252]
+	}
+	if r := table[b-0x80]; r != 0 {
+		return r
+	}
+	return rune(b)
 }
 
 // cp1252ToRune decodes a byte under the Windows-1252 code page — the

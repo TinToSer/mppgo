@@ -14,12 +14,8 @@ type Task struct {
 	WBS          string
 	OutlineLevel int
 
-	// Start and Finish are the dates MS Project shows for the task, and are
-	// stored only for leaf tasks that are active. They are zero for summary
-	// tasks (MS Project rolls those up from the children rather than
-	// storing them) and for inactive tasks. EarlyStart/EarlyFinish below
-	// are populated for every task, so prefer those when a date is needed
-	// for a summary row.
+	// Start and Finish are the dates MS Project shows for the task, summary
+	// tasks included.
 	Start  time.Time
 	Finish time.Time
 
@@ -122,4 +118,92 @@ type Task struct {
 	CalendarUniqueID int
 
 	CustomFields map[string]interface{}
+
+	GUID string
+
+	// Manual reports a manually scheduled task. Its Duration is the manual
+	// duration MS Project shows; ManualDuration keeps it separately.
+	Manual         bool
+	ManualDuration Duration
+
+	// TotalSlack is the smaller of StartSlack and FinishSlack (FinishSlack
+	// once the task has started), and Critical is true when it is within
+	// the project's critical slack limit — MS Project's own definitions.
+	TotalSlack Duration
+	Critical   bool
+	Estimated  bool
+
+	// Stop and Resume bound a split in progress: work is complete up to
+	// Stop and the remaining work resumes at Resume.
+	Stop   time.Time
+	Resume time.Time
+
+	LevelingDelay Duration
+
+	Contact             string
+	Hyperlink           string
+	HyperlinkAddress    string
+	HyperlinkSubAddress string
+	HyperlinkScreenTip  string
+
+	// Earned value: budgeted cost of work scheduled/performed and actual
+	// cost of work performed.
+	BCWS float64
+	BCWP float64
+	ACWP float64
+
+	RegularWork           Duration
+	OvertimeWork          Duration
+	ActualOvertimeWork    Duration
+	RemainingOvertimeWork Duration
+	OvertimeCost          float64
+	ActualOvertimeCost    float64
+	RemainingOvertimeCost float64
+
+	FixedCostAccrual        string // "Start", "End" or "Prorated"
+	EarnedValueMethod       string
+	PhysicalPercentComplete float64
+
+	EffortDriven           bool
+	Rollup                 bool
+	HideBar                bool
+	Marked                 bool
+	IgnoreResourceCalendar bool
+	LevelAssignments       bool
+	LevelingCanSplit       bool
+
+	// SubprojectFile is the inserted project a task stands for, and
+	// External marks a task that belongs to another project file (an
+	// inserted project's task or a cross-project link).
+	SubprojectFile     string
+	SubprojectReadOnly bool
+	External           bool
+
+	// Recurrence is set for a recurring task's summary row.
+	Recurrence *RecurringTask
+
+	// Fields holds every field the file stores for the task, decoded and
+	// keyed by MPXJ's field name in CamelCase ("TotalSlack", "Text1",
+	// "Baseline3Start", ...): time.Time, Duration, float64, int, bool,
+	// string, TimeUnit, ConstraintType or TaskType. It includes the fields
+	// above, and fields with no typed counterpart. An absent key means the
+	// file stores no value. Populated by the MPP reader.
+	Fields map[string]interface{}
+}
+
+// RecurringTask describes the pattern of a recurring task.
+type RecurringTask struct {
+	Start, Finish   time.Time
+	Duration        Duration
+	Occurrences     int
+	Type            string // "Daily", "Weekly", "Monthly" or "Yearly"
+	UseEndDate      bool
+	WorkingDaysOnly bool
+	WeeklyDays      [7]bool // indexed by time.Weekday
+	Relative        bool
+	Frequency       int
+	DayNumber       int
+	DayOfWeek       time.Weekday
+	MonthNumber     int
+	YearlyDate      time.Time
 }

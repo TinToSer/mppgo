@@ -21,6 +21,11 @@ type File struct {
 
 	CustomFieldAliases map[int]string
 
+	// ProjectSummaryTask is the hidden task MS Project keeps at unique ID 0,
+	// carrying the project-wide rollups (dates, work, cost, progress). It
+	// is not one of Tasks. Nil if the file has none.
+	ProjectSummaryTask *Task
+
 	// DefaultCalendar is the project's default calendar, if it could be
 	// identified.
 	DefaultCalendar *Calendar

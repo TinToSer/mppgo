@@ -51,4 +51,53 @@ type Assignment struct {
 	TimephasedBaselineWork map[int][]TimephasedWork
 	TimephasedBaselineCost map[int][]TimephasedCost
 	RawTimephased          []TimephasedData
+
+	// TimephasedActualOvertimeWork is actual work done as overtime.
+	TimephasedActualOvertimeWork []TimephasedWork
+
+	GUID string
+
+	Cost          float64
+	ActualCost    float64
+	RemainingCost float64
+	OvertimeCost  float64
+	BCWS          float64
+	BCWP          float64
+	ACWP          float64
+
+	ActualWork         Duration
+	RemainingWork      Duration
+	RegularWork        Duration
+	OvertimeWork       Duration
+	ActualOvertimeWork Duration
+
+	PercentWorkComplete float64
+
+	ActualStart  time.Time
+	ActualFinish time.Time
+	Stop         time.Time
+	Resume       time.Time
+	Created      time.Time
+
+	// Delay is the assignment delay; LevelingDelay the delay added by
+	// resource leveling.
+	Delay         Duration
+	LevelingDelay Duration
+
+	WorkContour   string // "Flat", "Back Loaded", ..., "Contoured"
+	CostRateTable int    // 0-4: rate table A-E
+
+	Confirmed       bool
+	ResponsePending bool
+
+	Hyperlink           string
+	HyperlinkAddress    string
+	HyperlinkSubAddress string
+	HyperlinkScreenTip  string
+
+	CustomFields map[string]interface{}
+
+	// Fields holds every field the file stores for the assignment; see
+	// Task.Fields.
+	Fields map[string]interface{}
 }

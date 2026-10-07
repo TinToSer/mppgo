@@ -3,6 +3,8 @@
 
 package project
 
+import "time"
+
 // Resource is a project resource (work, material, or cost). Field set will
 // grow as the MPP/MSPDI readers gain coverage.
 type Resource struct {
@@ -71,4 +73,46 @@ type Resource struct {
 	Availability []AvailabilityEntry
 
 	CustomFields map[string]interface{}
+
+	GUID          string
+	Generic       bool
+	Budget        bool
+	CanLevel      bool
+	AccrueAt      string // "Start", "End" or "Prorated"
+	Phonetics     string
+	NTAccount     string
+	MaterialLabel string
+	BookingType   string
+
+	Hyperlink           string
+	HyperlinkAddress    string
+	HyperlinkSubAddress string
+	HyperlinkScreenTip  string
+
+	StandardRateUnits TimeUnit
+	OvertimeRateUnits TimeUnit
+	PeakUnits         float64
+
+	RegularWork        Duration
+	ActualWork         Duration
+	RemainingWork      Duration
+	OvertimeWork       Duration
+	ActualOvertimeWork Duration
+	ActualCost         float64
+	RemainingCost      float64
+	OvertimeCost       float64
+
+	BCWS float64
+	BCWP float64
+	ACWP float64
+
+	Start         time.Time
+	Finish        time.Time
+	AvailableFrom time.Time
+	AvailableTo   time.Time
+	Created       time.Time
+
+	// Fields holds every field the file stores for the resource; see
+	// Task.Fields.
+	Fields map[string]interface{}
 }

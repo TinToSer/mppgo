@@ -17,6 +17,7 @@ import (
 
 const taskAttributeBase = 0x0B400000
 const resourceAttributeBase = 0x0C400000
+const assignmentAttributeBase = 0x0F400000
 
 type xmlProjectExtendedAttributes struct {
 	Attributes []xmlAttributeDefinition `xml:"ExtendedAttribute"`
@@ -42,6 +43,25 @@ func Write(writer io.Writer, file *project.File) error {
 		StartDate: writeDate(properties.StartDate), FinishDate: writeDate(properties.FinishDate), StatusDate: writeDate(properties.StatusDate),
 		MinutesPerDay: properties.MinutesPerDay, MinutesPerWeek: properties.MinutesPerWeek, DaysPerMonth: properties.DaysPerMonth,
 		DurationFormat: pointer(7), Calendars: &xmlCalendars{}, Tasks: &xmlTasks{}, Resources: &xmlResources{}, Assignments: &xmlAssignments{},
+
+		GUID: properties.GUID, CreationDate: writeDate(properties.CreationDate), Revision: properties.Revision,
+		LastSaved: writeDate(properties.LastSaved), ScheduleFromStart: pointer(properties.ScheduleFromStart),
+		FYStartDate: properties.FiscalYearStartMonth, CriticalSlackLimit: pointer(int(math.Round(properties.CriticalSlackLimit.Amount))),
+		CurrencyDigits: pointer(properties.CurrencyDigits), CurrencySymbol: properties.CurrencySymbol, CurrencyCode: properties.CurrencyCode,
+		CurrencySymbolPosition: pointer(currencySymbolPositionCode(properties.CurrencySymbolPosition)),
+		BaselineCalendar:       properties.BaselineCalendarName,
+		DefaultStartTime:       writeClock(properties.DefaultStartTime), DefaultFinishTime: writeClock(properties.DefaultEndTime),
+		DefaultTaskType: pointer(int(properties.DefaultTaskType)), DefaultStandardRate: properties.DefaultStandardRate,
+		DefaultOvertimeRate: properties.DefaultOvertimeRate, WorkFormat: pointer(writeDurationFormat(properties.DefaultWorkUnits)),
+		EditableActualCosts: properties.EditableActualCosts, HonorConstraints: properties.HonorConstraints,
+		MultipleCriticalPaths: properties.MultipleCriticalPaths, SplitsInProgressTasks: properties.SplitInProgressTasks,
+		TaskUpdatesResource: properties.TaskUpdatesResource, FiscalYearStart: properties.FiscalYearStart,
+		WeekStartDay: pointer(int(properties.WeekStartDay)), NewTasksAreManual: properties.NewTasksAreManual,
+	}
+	if properties.DefaultWorkUnits == project.Minutes && properties.DefaultStartTime == 0 && properties.DefaultEndTime == 0 {
+		// A model built in code rather than read: let Project apply its own
+		// defaults instead of zeros.
+		root.WorkFormat, root.DefaultStartTime, root.DefaultFinishTime = nil, xmlTime{}, xmlTime{}
 	}
 	if file.DefaultCalendar != nil {
 		root.CalendarUID = pointer(file.DefaultCalendar.UniqueID)
@@ -54,12 +74,28 @@ func Write(writer io.Writer, file *project.File) error {
 	if len(ids) > 0 {
 		root.ExtendedAttributes = &xmlProjectExtendedAttributes{}
 		for _, id := range ids {
-			definition := taskCustomFields[id&0xFFFF]
-			if id&0xFFFF0000 == resourceAttributeBase {
-				definition = resourceCustomFields[id&0xFFFF]
+			// Aliases can name fields this writer has no ExtendedAttribute
+			// definition for (outline codes, assignment fields, ...); a
+			// definition with the wrong or an empty FieldName is worse
+			// than none.
+			var definition customFieldDef
+			var known bool
+			switch id &^ 0xFFFF {
+			case taskAttributeBase:
+				definition, known = taskCustomFields[id&0xFFFF]
+			case resourceAttributeBase:
+				definition, known = resourceCustomFields[id&0xFFFF]
+			case assignmentAttributeBase:
+				definition, known = assignmentCustomFields[id&0xFFFF]
+			}
+			if !known {
+				continue
 			}
 			root.ExtendedAttributes.Attributes = append(root.ExtendedAttributes.Attributes,
 				xmlAttributeDefinition{FieldID: id, FieldName: definition.name, Alias: file.CustomFieldAliases[id]})
+		}
+		if len(root.ExtendedAttributes.Attributes) == 0 {
+			root.ExtendedAttributes = nil
 		}
 	}
 	for _, calendar := range file.Calendars {
@@ -71,6 +107,14 @@ func Write(writer io.Writer, file *project.File) error {
 	ordered, levels, err := taskOrder(file.Tasks)
 	if err != nil {
 		return err
+	}
+	if summary := file.ProjectSummaryTask; summary != nil {
+		xmlTask, err := writeTask(summary, 0, scale, file.CustomFieldAliases)
+		if err != nil {
+			return err
+		}
+		xmlTask.UID, xmlTask.ID = 0, 0
+		root.Tasks.Task = append(root.Tasks.Task, xmlTask)
 	}
 	for _, task := range ordered {
 		xmlTask, err := writeTask(task, levels[task.UniqueID], scale, file.CustomFieldAliases)
@@ -104,21 +148,66 @@ func Write(writer io.Writer, file *project.File) error {
 		xmlResource := xmlResource{UID: resource.UniqueID, ID: resource.ID, Name: resource.Name, Type: kind,
 			IsCostResource: resource.Type == project.CostResource, Initials: resource.Initials, Code: resource.Code,
 			Group: resource.Group, EmailAddress: resource.EmailAddress, MaxUnits: resource.MaxUnits / 100,
-			StandardRate: resource.StandardRate, OvertimeRate: resource.OvertimeRate, CostPerUse: resource.CostPerUse,
-			Cost: resource.Cost, Work: writeDuration(resource.Work, scale), CalendarUID: pointer(resource.CalendarUniqueID),
-			Notes: resource.Notes, ExtendedAttribute: attributes}
+			// MSPDI rates are per hour whatever unit Project shows them in.
+			StandardRate:       resource.StandardRate * 60 / scale.minutesPerUnit(resource.StandardRateUnits),
+			StandardRateFormat: writeRateUnit(resource.StandardRateUnits),
+			OvertimeRate:       resource.OvertimeRate * 60 / scale.minutesPerUnit(resource.OvertimeRateUnits),
+			OvertimeRateFormat: writeRateUnit(resource.OvertimeRateUnits),
+			CostPerUse:         resource.CostPerUse,
+			Cost:               resource.Cost, Work: writeDuration(resource.Work, scale), Notes: resource.Notes, ExtendedAttribute: attributes,
+
+			GUID: resource.GUID, Phonetics: resource.Phonetics, NTAccount: resource.NTAccount, MaterialLabel: resource.MaterialLabel,
+			Hyperlink: resource.Hyperlink, HyperlinkAddress: resource.HyperlinkAddress, HyperlinkSubAddress: resource.HyperlinkSubAddress,
+			PeakUnits: resource.PeakUnits / 100, AvailableFrom: writeDate(resource.AvailableFrom), AvailableTo: writeDate(resource.AvailableTo),
+			Start: writeDate(resource.Start), Finish: writeDate(resource.Finish), CanLevel: resource.CanLevel,
+			RegularWork: optionalDuration(resource.RegularWork, scale), OvertimeWork: optionalDuration(resource.OvertimeWork, scale),
+			ActualWork: optionalDuration(resource.ActualWork, scale), RemainingWork: optionalDuration(resource.RemainingWork, scale),
+			ActualOvertimeWork: optionalDuration(resource.ActualOvertimeWork, scale),
+			OvertimeCost:       resource.OvertimeCost, ActualCost: resource.ActualCost, RemainingCost: resource.RemainingCost,
+			ACWP: resource.ACWP, BCWS: resource.BCWS, BCWP: resource.BCWP, IsGeneric: resource.Generic, IsBudget: resource.Budget,
+			CreationDate: writeDate(resource.Created)}
+		if resource.AccrueAt != "" {
+			xmlResource.AccrueAt = pointer(accrueCode(resource.AccrueAt))
+		}
+		if resource.BookingType == "Proposed" {
+			xmlResource.BookingType = pointer(1)
+		}
+		if resource.CalendarUniqueID > 0 {
+			xmlResource.CalendarUID = pointer(resource.CalendarUniqueID)
+		}
 		for _, numbered := range baselines(resource.Baseline, resource.Baselines) {
 			xmlResource.Baseline = append(xmlResource.Baseline, xmlResourceBaseline{
 				Number: numbered.number, Start: writeDate(numbered.value.Start), Finish: writeDate(numbered.value.Finish),
 				Work: writeDuration(numbered.value.Work, scale), Cost: numbered.value.Cost})
 		}
-		xmlResource.Rates, xmlResource.Availability = writeResourceTables(resource)
+		xmlResource.Rates, xmlResource.Availability = writeResourceTables(resource, scale)
 		root.Resources.Resource = append(root.Resources.Resource, xmlResource)
 	}
 	for _, assignment := range file.Assignments {
+		attributes, err := writeAttributes(assignment.CustomFields, assignmentAttributeBase, assignmentCustomFields, file.CustomFieldAliases, scale)
+		if err != nil {
+			return err
+		}
+		resourceUID := assignment.ResourceUniqueID
+		if resourceUID == 0 {
+			resourceUID = nullResourceUID
+		}
 		xmlAssignment := xmlAssignment{UID: assignment.UniqueID, TaskUID: assignment.TaskUniqueID,
-			ResourceUID: pointer(assignment.ResourceUniqueID), Units: assignment.Units / 100,
-			Work: writeDuration(assignment.Work, scale), Start: writeDate(assignment.Start), Finish: writeDate(assignment.Finish), Notes: assignment.Notes}
+			ResourceUID: pointer(resourceUID), Units: assignment.Units / 100,
+			Work: writeDuration(assignment.Work, scale), Start: writeDate(assignment.Start), Finish: writeDate(assignment.Finish), Notes: assignment.Notes,
+
+			GUID: assignment.GUID, PercentWorkComplete: assignment.PercentWorkComplete, ActualCost: assignment.ActualCost,
+			ActualFinish: writeDate(assignment.ActualFinish), ActualStart: writeDate(assignment.ActualStart),
+			ActualOvertimeWork: optionalDuration(assignment.ActualOvertimeWork, scale), ActualWork: optionalDuration(assignment.ActualWork, scale),
+			ACWP: assignment.ACWP, Confirmed: assignment.Confirmed, Cost: assignment.Cost, CostRateTable: assignment.CostRateTable,
+			Delay:     pointer(tenths(assignment.Delay, scale)),
+			Hyperlink: assignment.Hyperlink, HyperlinkAddress: assignment.HyperlinkAddress, HyperlinkSubAddress: assignment.HyperlinkSubAddress,
+			LevelingDelay: pointer(tenths(assignment.LevelingDelay, scale)), LevelingDelayFormat: writeDurationFormat(assignment.LevelingDelay.Units),
+			OvertimeCost: assignment.OvertimeCost, OvertimeWork: optionalDuration(assignment.OvertimeWork, scale),
+			RegularWork: optionalDuration(assignment.RegularWork, scale), RemainingCost: assignment.RemainingCost,
+			RemainingWork: optionalDuration(assignment.RemainingWork, scale), ResponsePending: assignment.ResponsePending,
+			Stop: writeDate(assignment.Stop), Resume: writeDate(assignment.Resume), WorkContour: workContourCode(assignment.WorkContour),
+			BCWS: assignment.BCWS, BCWP: assignment.BCWP, CreationDate: writeDate(assignment.Created), ExtendedAttribute: attributes}
 		for _, numbered := range baselines(assignment.Baseline, assignment.Baselines) {
 			xmlAssignment.Baseline = append(xmlAssignment.Baseline, xmlAssignmentBaseline{
 				Number: numbered.number, Start: writeDate(numbered.value.Start), Finish: writeDate(numbered.value.Finish),
@@ -167,20 +256,42 @@ func writeTask(task *project.Task, level int, scale durationScale, aliases map[i
 		return xmlTask{}, err
 	}
 	result := xmlTask{UID: task.UniqueID, ID: task.ID, Name: task.Name, Active: pointer(!task.Inactive), Type: int(task.Type),
-		WBS: task.WBS, OutlineLevel: level, Priority: task.Priority, Start: writeDate(task.Start), Finish: writeDate(task.Finish),
+		GUID: task.GUID, Manual: task.Manual, Contact: task.Contact, Stop: writeDate(task.Stop), Resume: writeDate(task.Resume),
+		EffortDriven: task.EffortDriven, Recurring: task.Recurrence != nil, Estimated: task.Estimated, Critical: task.Critical,
+		IsSubproject: task.SubprojectFile != "", IsSubprojectReadOnly: task.SubprojectReadOnly, SubprojectName: task.SubprojectFile,
+		ExternalTask:     task.External,
+		TotalSlack:       pointer(tenths(task.TotalSlack, scale)),
+		FixedCostAccrual: pointer(accrueCode(task.FixedCostAccrual)),
+		OvertimeCost:     task.OvertimeCost, OvertimeWork: optionalDuration(task.OvertimeWork, scale),
+		ActualOvertimeCost: task.ActualOvertimeCost, ActualOvertimeWork: optionalDuration(task.ActualOvertimeWork, scale),
+		RegularWork: optionalDuration(task.RegularWork, scale), RemainingOvertimeCost: task.RemainingOvertimeCost,
+		RemainingOvertimeWork: optionalDuration(task.RemainingOvertimeWork, scale), ACWP: task.ACWP,
+		LevelAssignments: task.LevelAssignments, LevelingCanSplit: task.LevelingCanSplit,
+		LevelingDelay: pointer(tenths(task.LevelingDelay, scale)), LevelingDelayFormat: writeDurationFormat(task.LevelingDelay.Units),
+		Hyperlink: task.Hyperlink, HyperlinkAddress: task.HyperlinkAddress, HyperlinkSubAddress: task.HyperlinkSubAddress,
+		IgnoreResourceCalendar: task.IgnoreResourceCalendar, HideBar: task.HideBar, Rollup: task.Rollup,
+		BCWS: task.BCWS, BCWP: task.BCWP, PhysicalPercentComplete: task.PhysicalPercentComplete,
+		EarnedValueMethod: earnedValueMethodCode(task.EarnedValueMethod),
+		WBS:               task.WBS, OutlineLevel: level, Priority: task.Priority, Start: writeDate(task.Start), Finish: writeDate(task.Finish),
 		Duration: writeDuration(task.Duration, scale), DurationFormat: writeDurationFormat(task.Duration.Units),
 		Work: writeDuration(task.Work, scale), ActualWork: writeDuration(task.ActualWork, scale), RemainingWork: writeDuration(task.RemainingWork, scale),
 		Milestone: task.Milestone, Summary: task.Summary, EarlyStart: writeDate(task.EarlyStart), EarlyFinish: writeDate(task.EarlyFinish),
 		LateStart: writeDate(task.LateStart), LateFinish: writeDate(task.LateFinish),
-		FreeSlack:   pointer(int(math.Round(scale.convert(task.FreeSlack.Amount, task.FreeSlack.Units, project.Minutes) * 10))),
-		StartSlack:  pointer(int(math.Round(scale.convert(task.StartSlack.Amount, task.StartSlack.Units, project.Minutes) * 10))),
-		FinishSlack: pointer(int(math.Round(scale.convert(task.FinishSlack.Amount, task.FinishSlack.Units, project.Minutes) * 10))),
+		FreeSlack:   pointer(tenths(task.FreeSlack, scale)),
+		StartSlack:  pointer(tenths(task.StartSlack, scale)),
+		FinishSlack: pointer(tenths(task.FinishSlack, scale)),
 		FixedCost:   task.FixedCost, PercentComplete: task.PercentComplete, PercentWorkComplete: task.PercentWorkComplete,
 		Cost: task.Cost, ActualStart: writeDate(task.ActualStart), ActualFinish: writeDate(task.ActualFinish),
 		ActualDuration: writeDuration(task.ActualDuration, scale), ActualCost: task.ActualCost, RemainingCost: task.RemainingCost,
 		RemainingDuration: writeDuration(task.RemainingDuration, scale), ConstraintType: pointer(int(task.ConstraintType)),
-		CalendarUID: pointer(task.CalendarUniqueID), ConstraintDate: writeDate(task.ConstraintDate), Deadline: writeDate(task.Deadline),
+		CalendarUID: pointer(-1), ConstraintDate: writeDate(task.ConstraintDate), Deadline: writeDate(task.Deadline),
 		Notes: task.Notes, CreateDate: writeDate(task.Created), ExtendedAttribute: attributes}
+	if task.CalendarUniqueID > 0 {
+		result.CalendarUID = pointer(task.CalendarUniqueID)
+	}
+	if task.Manual && task.ManualDuration != (project.Duration{}) {
+		result.ManualDuration = writeDuration(task.ManualDuration, scale)
+	}
 	for _, numbered := range baselines(task.Baseline, task.Baselines) {
 		baseline := numbered.value
 		result.Baseline = append(result.Baseline, xmlTaskBaseline{Number: numbered.number,
@@ -202,6 +313,20 @@ func writeCalendar(calendar *project.Calendar) xmlCalendar {
 		}
 		result.WeekDays.WeekDay = append(result.WeekDays.WeekDay, xmlWeekDay{
 			DayType: int(day) + 1, DayWorking: calendar.DayType(day) == project.DayWorking, WorkingTimes: writeRanges(calendar.Hours[day])})
+	}
+	for _, week := range calendar.WorkWeeks {
+		if result.WorkWeeks == nil {
+			result.WorkWeeks = &xmlWorkWeeks{}
+		}
+		xw := xmlWorkWeek{Name: week.Name, TimePeriod: &xmlTimePeriod{FromDate: writeDate(week.FromDate), ToDate: writeDate(week.ToDate)}, WeekDays: &xmlWeekDays{}}
+		for day := time.Sunday; day <= time.Saturday; day++ {
+			if week.Days[day] == project.DayDefault {
+				continue
+			}
+			xw.WeekDays.WeekDay = append(xw.WeekDays.WeekDay, xmlWeekDay{DayType: int(day) + 1,
+				DayWorking: week.Days[day] == project.DayWorking, WorkingTimes: writeRanges(week.Hours[day])})
+		}
+		result.WorkWeeks.WorkWeek = append(result.WorkWeeks.WorkWeek, xw)
 	}
 	for _, exception := range calendar.Exceptions {
 		result.Exceptions.Exception = append(result.Exceptions.Exception, xmlException{Name: exception.Name,
@@ -312,6 +437,9 @@ func readAliases(file *project.File, definitions *xmlProjectExtendedAttributes) 
 	for _, resource := range file.Resources {
 		apply(resource.CustomFields, resourceAttributeBase, resourceCustomFields)
 	}
+	for _, assignment := range file.Assignments {
+		apply(assignment.CustomFields, assignmentAttributeBase, assignmentCustomFields)
+	}
 }
 
 func taskOrder(tasks []*project.Task) ([]*project.Task, map[int]int, error) {
@@ -376,15 +504,58 @@ func baselines(primary *project.Baseline, numbered map[int]*project.Baseline) []
 
 func pointer[Value any](value Value) *Value { return &value }
 
+// nullResourceUID is MSPDI's ResourceUID for an assignment with no resource.
+const nullResourceUID = -65535
+
+// tenths converts a duration to MSPDI's integer tenths of a minute.
+func tenths(d project.Duration, scale durationScale) int {
+	return int(math.Round(scale.convert(d.Amount, d.Units, project.Minutes) * 10))
+}
+
+// optionalDuration writes a work amount only when it is set.
+func optionalDuration(d project.Duration, scale durationScale) string {
+	if d.Amount == 0 {
+		return ""
+	}
+	return writeDuration(d, scale)
+}
+
+func writeClock(offset time.Duration) xmlTime {
+	return xmlTime{Offset: offset, Valid: true}
+}
+
+func earnedValueMethodCode(name string) int {
+	if name == "Physical % Complete" {
+		return 1
+	}
+	return 0
+}
+
 func writeDate(date time.Time) xmlDateTime { return xmlDateTime{Time: date, Valid: !date.IsZero()} }
 
+// writeDuration formats a duration the way MS Project itself writes one,
+// PTnHnMnS, rather than a bare seconds count: a valid xsd:duration either
+// way, but the form Project's own importer is known to accept.
 func writeDuration(duration project.Duration, scale durationScale) string {
 	seconds := scale.convert(duration.Amount, duration.Units, project.Minutes) * 60
 	prefix := "PT"
 	if seconds < 0 {
 		prefix, seconds = "-PT", -seconds
 	}
-	return prefix + strconv.FormatFloat(seconds, 'f', -1, 64) + "S"
+	hours := math.Floor(seconds / 3600)
+	seconds -= hours * 3600
+	minutes := math.Floor(seconds / 60)
+	seconds -= minutes * 60
+	// Floating-point residue from unit conversion (e.g. 59.99999 s) would
+	// otherwise print as a long fraction.
+	seconds = math.Round(seconds*1000) / 1000
+	if seconds >= 60 {
+		minutes, seconds = minutes+1, seconds-60
+	}
+	if minutes >= 60 {
+		hours, minutes = hours+1, minutes-60
+	}
+	return fmt.Sprintf("%s%.0fH%.0fM%sS", prefix, hours, minutes, strconv.FormatFloat(seconds, 'f', -1, 64))
 }
 
 func writeDurationFormat(unit project.TimeUnit) int {

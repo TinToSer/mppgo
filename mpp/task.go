@@ -59,12 +59,18 @@ const (
 	taskFieldIDFixedCost        = 8
 	taskFieldIDActualCost       = 7
 	taskFieldIDRemainingCost    = 10
-	// Start/Finish live in block 1 (Fixed2Data), unlike everything above:
-	// they are the dates MS Project currently shows for the task, as
-	// opposed to the critical-path EARLY_START/EARLY_FINISH pair in
-	// block 0.
-	taskFieldIDStart  = 1283
-	taskFieldIDFinish = 1284
+	// Start/Finish: the dates MS Project shows for the task, as opposed to
+	// the critical-path EARLY_START/EARLY_FINISH pair. Real Project 2016+
+	// files place them in block 0 (FixedData) for every task, summary tasks
+	// included.
+	taskFieldIDStart  = 35
+	taskFieldIDFinish = 36
+	// A second Start/Finish pair in block 1 (Fixed2Data). It matches the
+	// pair above where present, but MS Project leaves it "NA" for summary
+	// tasks and, in some files, for every task — so it is only a fallback
+	// for a file whose field map does not locate the primary pair.
+	taskFieldIDScheduledStart  = 1283
+	taskFieldIDScheduledFinish = 1284
 
 	// MPP14 default offsets within a TBkndTask FixedData record (block 0),
 	// used when the file carries no field map of its own. See NOTICE.
@@ -185,8 +191,7 @@ func taskMilestoneBitLayout(applicationVersion int) (offset, mask int) {
 // flag within a task's Fixed2Meta record (distinct from the MILESTONE
 // flag's home in the primary FixedMeta record above). A clear bit means
 // the task has been explicitly deactivated in MS Project (available since
-// Project 2010) — MS Project then blanks that task's Start/Finish while
-// leaving LateStart/LateFinish as whatever they were before deactivation.
+// Project 2010).
 // Project 2013 and 2016+ share a layout; 2010 differs.
 func taskActiveBitLayout(applicationVersion int) (offset, mask int) {
 	if applicationVersion <= appVersionProject2010 {
@@ -231,38 +236,40 @@ var taskFlagFieldIDs = [20]int{
 // readTasks reads the TBkndTask storage and returns the tasks it defines.
 // Summary is derived after the fact: MS Project does not store it directly,
 // a task is a summary task exactly when some other task names it as parent.
-func readTasks(src *streamSource, projectDirPath string, projectProps *Props, applicationVersion int, scale durationScale, defaultUnits project.TimeUnit, aliases customFieldAliases, outlineCodeValues map[int]outlineCodeValue) ([]*project.Task, error) {
+func readTasks(ctx *readContext, projectDirPath string) ([]*project.Task, *project.Task, error) {
+	src, projectProps, applicationVersion := ctx.src, ctx.props, ctx.version
+	scale, defaultUnits, aliases := ctx.scale, ctx.defaultUnits, ctx.aliases
 	dir := projectDirPath + "/TBkndTask"
 
 	varMetaRaw, err := src.plain(dir + "/VarMeta")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	varMeta, err := ParseVarMeta(varMetaRaw)
 	if err != nil {
-		return nil, fmt.Errorf("mpp: task VarMeta: %w", err)
+		return nil, nil, fmt.Errorf("mpp: task VarMeta: %w", err)
 	}
 	var2Raw, err := src.plain(dir + "/Var2Data")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	varData := ParseVar2Data(varMeta, var2Raw)
 
 	fixedMetaRaw, err := src.plain(dir + "/FixedMeta")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fixedMeta, err := ParseFixedMeta(fixedMetaRaw, 47)
 	if err != nil {
-		return nil, fmt.Errorf("mpp: task FixedMeta: %w", err)
+		return nil, nil, fmt.Errorf("mpp: task FixedMeta: %w", err)
 	}
 	fixedRaw, err := src.decoded(dir + "/FixedData")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fixedData := ParseFixedData(fixedMeta, fixedRaw, 512, 0)
 
-	// Fixed2Data carries the Start/Finish pair, and Fixed2Meta itself (kept
+	// Fixed2Data carries the fallback Start/Finish pair, and Fixed2Meta itself (kept
 	// alongside it, not just used to locate it) carries the ACTIVE bit.
 	// Fixed2Meta's item size varies by file version, so it is picked
 	// heuristically against the FixedData item count already established
@@ -282,8 +289,13 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 	}
 
 	fm := loadFieldMap(projectProps, taskFieldMapPropsKey1, taskFieldMapPropsKey2)
+	decoder := newFieldDecoder(ctx, taskFieldDefs, fieldMapData(projectProps, taskFieldMapPropsKey1, taskFieldMapPropsKey2))
+	var summary *project.Task
 	off := func(fieldID, defaultOffset int) int {
-		return fieldOffset(fm, taskFieldBase|fieldID, defaultOffset)
+		return fieldOffset(fm, taskFieldBase|fieldID, 0, defaultOffset)
+	}
+	off2 := func(fieldID, defaultOffset int) int {
+		return fieldOffset(fm, taskFieldBase|fieldID, 1, defaultOffset)
 	}
 	offUniqueID := off(taskFieldIDUniqueID, taskDefaultOffsetUniqueID)
 	offID := off(taskFieldIDID, taskDefaultOffsetID)
@@ -293,8 +305,12 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 	offPercentComplete := off(taskFieldIDPercentComplete, taskDefaultOffsetPercentComplete)
 	offLateFinish := off(taskFieldIDLateFinish, taskDefaultOffsetLateFinish)
 	offCalendarUniqueID := off(taskFieldIDCalendarUniqueID, taskDefaultOffsetCalendarUniqueID)
-	off2Start := off(taskFieldIDStart, taskDefault2OffsetStart)
-	off2Finish := off(taskFieldIDFinish, taskDefault2OffsetFinish)
+	// Without a field map there is no known block-0 location for
+	// Start/Finish, so -1 (absent) defers to the block-1 pair below.
+	offStart := off(taskFieldIDStart, -1)
+	offFinish := off(taskFieldIDFinish, -1)
+	off2Start := off2(taskFieldIDScheduledStart, taskDefault2OffsetStart)
+	off2Finish := off2(taskFieldIDScheduledFinish, taskDefault2OffsetFinish)
 	offDuration := off(taskFieldIDDuration, taskDefaultOffsetDuration)
 	offDurationUnits := off(taskFieldIDDurationUnits, taskDefaultOffsetDurationUnits)
 	offEarlyStart := off(taskFieldIDEarlyStart, taskDefaultOffsetEarlyStart)
@@ -343,8 +359,9 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 			continue // placeholder task; not modelled
 		}
 
+		// Unique ID 0 is the project summary task, kept apart from Tasks.
 		uniqueID := getInt(rec, offUniqueID)
-		if uniqueID <= 0 {
+		if uniqueID < 0 || (uniqueID == 0 && getInt(rec, offID) != 0) {
 			continue
 		}
 
@@ -385,6 +402,8 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 			dst    *time.Time
 			offset int
 		}{
+			{&t.Start, offStart},
+			{&t.Finish, offFinish},
 			{&t.LateStart, offLateStart},
 			{&t.LateFinish, offLateFinish},
 			{&t.EarlyStart, offEarlyStart},
@@ -401,10 +420,10 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 		}
 		if fixed2Data != nil {
 			if rec2 := fixed2Data.ByteArrayValue(i); rec2 != nil {
-				if d, ok := getTimestamp(rec2, off2Start); ok {
+				if d, ok := getTimestamp(rec2, off2Start); ok && t.Start.IsZero() {
 					t.Start = d
 				}
-				if d, ok := getTimestamp(rec2, off2Finish); ok {
+				if d, ok := getTimestamp(rec2, off2Finish); ok && t.Finish.IsZero() {
 					t.Finish = d
 				}
 			}
@@ -437,8 +456,24 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 			}
 		}
 
-		t.CustomFields = addTaskFlags(readTaskCustomFields(varData, uniqueID, aliases, scale, defaultUnits, outlineCodeValues), metaData, flagBits, aliases)
+		var rec2 []byte
+		if fixed2Data != nil {
+			rec2 = fixed2Data.ByteArrayValue(i)
+		}
+		var metaData2 []byte
+		if fixed2Meta != nil {
+			metaData2 = fixed2Meta.ByteArrayValue(i)
+		}
+		t.Fields = decoder.decode([][]byte{rec, rec2}, varData, uniqueID)
+		applyTaskFields(ctx, t, t.Fields, getShort(rec, offDurationUnits), metaData, metaData2, varData)
 
+		t.CustomFields = addTaskFlags(customFields(t.Fields, taskFieldBase, taskFieldIndex, aliases), metaData, flagBits, aliases)
+		t.CustomFields = addOutlineCodes(t.CustomFields, varData, uniqueID, taskFieldBase, taskOutlineCodeIndexVarKeys, aliases, ctx.values)
+
+		if uniqueID == 0 {
+			summary = t
+			continue
+		}
 		if _, exists := byID[uniqueID]; !exists {
 			order = append(order, uniqueID)
 		}
@@ -468,7 +503,7 @@ func readTasks(src *streamSource, projectDirPath string, projectProps *Props, ap
 
 	synthesizeWBS(tasks)
 
-	return tasks, nil
+	return tasks, summary, nil
 }
 
 // taskCalendarUniqueID normalizes MPXJ's "no calendar set on this task"
@@ -542,56 +577,81 @@ func readTaskBaseline(varData *Var2Data, uniqueID int, k taskBaselineVarKeys, sc
 	return b
 }
 
-// readTaskCustomFields collects the task's generic custom fields (Text1-30,
-// Number1-20, Date1-10, Duration1-10, Cost1-10, Outline Code1-10) into the
-// map exposed as Task.CustomFields, keyed by the field's user-assigned
-// alias if it has one (see readCustomFieldAliases) or its generic name
-// otherwise. A field the file has no data for is left out of the map
-// entirely, rather than being present with a zero value indistinguishable
-// from a real zero.
-func readTaskCustomFields(varData *Var2Data, uniqueID int, aliases customFieldAliases, scale durationScale, defaultUnits project.TimeUnit, outlineCodeValues map[int]outlineCodeValue) map[string]interface{} {
+// customFieldGroups lists the generic custom fields by name prefix and
+// count. Flags (bits in the meta-data record) and outline codes (indexes
+// into the shared value table) are added separately.
+var customFieldGroups = []struct {
+	prefix string
+	count  int
+}{
+	{"Text", 30}, {"Start", 10}, {"Finish", 10}, {"Number", 20}, {"Date", 10}, {"Duration", 10}, {"Cost", 10},
+}
+
+// customFields collects an entity's generic custom fields (Text1-30,
+// Start1-10, Finish1-10, Number1-20, Date1-10, Duration1-10, Cost1-10)
+// from its decoded field values into the map exposed as CustomFields,
+// keyed by the field's user-assigned alias if it has one (see
+// readCustomFieldAliases) or its generic name otherwise. A field the file
+// has no data for is left out of the map entirely, rather than being
+// present with a zero value indistinguishable from a real zero.
+func customFields(decoded map[string]interface{}, base int, index map[string]int, aliases customFieldAliases) map[string]interface{} {
 	fields := make(map[string]interface{})
-
-	for i, key := range taskTextVarKeys {
-		if v := varData.UnicodeString(uniqueID, key); v != "" {
-			fields[aliases.name(taskFieldBase|key, fmt.Sprintf("Text%d", i+1))] = v
+	for _, group := range customFieldGroups {
+		for n := 1; n <= group.count; n++ {
+			name := fmt.Sprintf("%s%d", group.prefix, n)
+			if v, ok := decoded[name]; ok {
+				// Two fields given the same alias (or an alias that is
+				// another field's generic name) must not overwrite each
+				// other: the later one keeps its generic name.
+				key := aliases.name(base|index[name], name)
+				if _, taken := fields[key]; taken {
+					key = name
+				}
+				fields[key] = v
+			}
 		}
 	}
-	for i, key := range taskNumberVarKeys {
-		if varData.Has(uniqueID, key) {
-			fields[aliases.name(taskFieldBase|key, fmt.Sprintf("Number%d", i+1))] = varData.Double(uniqueID, key)
-		}
-	}
-	for i, key := range taskDateVarKeys {
-		if d, ok := varData.Timestamp(uniqueID, key); ok {
-			fields[aliases.name(taskFieldBase|key, fmt.Sprintf("Date%d", i+1))] = d
-		}
-	}
-	for i, key := range taskCostVarKeys {
-		if varData.Has(uniqueID, key) {
-			fields[aliases.name(taskFieldBase|key, fmt.Sprintf("Cost%d", i+1))] = customFieldCurrency(varData.Double(uniqueID, key))
-		}
-	}
-	for i, keys := range taskDurationVarKeys {
-		valueKey, unitsKey := keys[0], keys[1]
-		if varData.Has(uniqueID, valueKey) {
-			units := durationTimeUnits(varData.Short(uniqueID, unitsKey), defaultUnits)
-			fields[aliases.name(taskFieldBase|valueKey, fmt.Sprintf("Duration%d", i+1))] = scale.duration(varData.Int(uniqueID, valueKey), units)
-		}
-	}
-	for i, key := range taskOutlineCodeIndexVarKeys {
-		if !varData.Has(uniqueID, key) {
-			continue
-		}
-		if path := resolveOutlineCodePath(outlineCodeValues, varData.Int(uniqueID, key)); path != "" {
-			fields[aliases.name(taskFieldBase|(key-1), fmt.Sprintf("Outline Code%d", i+1))] = path
-		}
-	}
-
 	if len(fields) == 0 {
 		return nil
 	}
 	return fields
+}
+
+// addOutlineCodes adds an entity's Outline Code1-10 values, resolved to
+// their full path through the shared value table. keys are the
+// OUTLINE_CODEn_INDEX var-data keys; the field an alias is registered
+// against is the one before each.
+func addOutlineCodes(fields map[string]interface{}, varData *Var2Data, uniqueID, base int, keys [10]int, aliases customFieldAliases, values map[int]lookupValue) map[string]interface{} {
+	for i, key := range keys {
+		if !varData.Has(uniqueID, key) {
+			continue
+		}
+		if path := resolveOutlineCodePath(values, varData.Int(uniqueID, key)); path != "" {
+			if fields == nil {
+				fields = make(map[string]interface{})
+			}
+			fields[aliases.name(base|(key-1), fmt.Sprintf("Outline Code%d", i+1))] = path
+		}
+	}
+	return fields
+}
+
+// Field name -> lowest index, for the generated field tables.
+var (
+	taskFieldIndex       = fieldIndexByName(taskFieldDefs)
+	resourceFieldIndex   = fieldIndexByName(resourceFieldDefs)
+	assignmentFieldIndex = fieldIndexByName(assignmentFieldDefs)
+)
+
+// fieldIndexByName maps each field name in defs to its lowest index.
+func fieldIndexByName(defs map[int]fieldDef) map[string]int {
+	index := make(map[string]int, len(defs))
+	for i, def := range defs {
+		if existing, ok := index[def.name]; !ok || i < existing {
+			index[def.name] = i
+		}
+	}
+	return index
 }
 
 // addTaskFlags merges any set Flag1..Flag20 bits into a task's custom-field

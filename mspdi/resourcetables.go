@@ -27,14 +27,21 @@ type xmlAvailabilityPeriod struct {
 	Units float64     `xml:"AvailableUnits"`
 }
 
-func readResourceTables(resource *project.Resource, value xmlResource) {
+// MSPDI stores every rate per hour, with the Format element only naming the
+// unit Project displays it in. The model (like the MPP reader) holds the
+// displayed amount — 400 per day, not 50 — so rates are converted on the
+// way in and back to per-hour on the way out.
+func readResourceTables(resource *project.Resource, value xmlResource, scale durationScale) {
 	if value.Rates != nil {
 		for _, rate := range value.Rates.Rates {
 			if rate.Table < 0 || rate.Table >= len(resource.CostRateTables) {
 				continue
 			}
-			entry := project.CostRateTableEntry{StandardRate: rate.Standard, StandardRateUnits: readRateUnit(rate.StandardUnit),
-				OvertimeRate: rate.Overtime, OvertimeRateUnits: readRateUnit(rate.OvertimeUnit), CostPerUse: rate.PerUse}
+			standardUnit, overtimeUnit := readRateUnit(rate.StandardUnit), readRateUnit(rate.OvertimeUnit)
+			entry := project.CostRateTableEntry{
+				StandardRate: rate.Standard * scale.minutesPerUnit(standardUnit) / 60, StandardRateUnits: standardUnit,
+				OvertimeRate: rate.Overtime * scale.minutesPerUnit(overtimeUnit) / 60, OvertimeRateUnits: overtimeUnit,
+				CostPerUse: rate.PerUse}
 			if rate.From.Valid {
 				entry.Start = rate.From.Time
 			}
@@ -58,7 +65,7 @@ func readResourceTables(resource *project.Resource, value xmlResource) {
 	}
 }
 
-func writeResourceTables(resource *project.Resource) (*xmlRates, *xmlAvailabilityPeriods) {
+func writeResourceTables(resource *project.Resource, scale durationScale) (*xmlRates, *xmlAvailabilityPeriods) {
 	var rates *xmlRates
 	for table, entries := range resource.CostRateTables {
 		for _, entry := range entries {
@@ -66,8 +73,9 @@ func writeResourceTables(resource *project.Resource) (*xmlRates, *xmlAvailabilit
 				rates = &xmlRates{}
 			}
 			rates.Rates = append(rates.Rates, xmlRate{From: writeDate(entry.Start), To: writeDate(entry.End), Table: table,
-				Standard: entry.StandardRate, StandardUnit: writeRateUnit(entry.StandardRateUnits),
-				Overtime: entry.OvertimeRate, OvertimeUnit: writeRateUnit(entry.OvertimeRateUnits), PerUse: entry.CostPerUse})
+				Standard: entry.StandardRate * 60 / scale.minutesPerUnit(entry.StandardRateUnits), StandardUnit: writeRateUnit(entry.StandardRateUnits),
+				Overtime: entry.OvertimeRate * 60 / scale.minutesPerUnit(entry.OvertimeRateUnits), OvertimeUnit: writeRateUnit(entry.OvertimeRateUnits),
+				PerUse: entry.CostPerUse})
 		}
 	}
 	var periods *xmlAvailabilityPeriods

@@ -53,4 +53,59 @@ type Properties struct {
 	// determines several field layouts within the file.
 	ApplicationName    string
 	ApplicationVersion int
+
+	GUID string
+
+	// Document properties MS Project writes to the OLE summary property
+	// sets rather than its own Props stream.
+	Template        string
+	LastAuthor      string
+	Revision        int
+	CreationDate    time.Time
+	LastSaved       time.Time
+	LastPrinted     time.Time
+	EditingTime     int // minutes, as recorded by the file
+	ContentType     string
+	ContentStatus   string
+	Language        string
+	DocumentVersion string
+	// CustomProperties are the File > Properties > Custom entries: string,
+	// int, float64, bool or time.Time values.
+	CustomProperties map[string]interface{}
+
+	ScheduleFromStart bool
+	// DefaultStartTime/DefaultEndTime are offsets from midnight.
+	DefaultStartTime time.Duration
+	DefaultEndTime   time.Duration
+
+	DefaultDurationUnits TimeUnit
+	DefaultWorkUnits     TimeUnit
+	DefaultTaskType      TaskType
+	DefaultStandardRate  float64 // per hour
+	DefaultOvertimeRate  float64 // per hour
+
+	CriticalSlackLimit    Duration
+	MultipleCriticalPaths bool
+	HonorConstraints      bool
+	SplitInProgressTasks  bool
+	TaskUpdatesResource   bool
+	EditableActualCosts   bool
+	NewTasksAreManual     bool
+
+	CurrencySymbol         string
+	CurrencyCode           string
+	CurrencyDigits         int
+	CurrencySymbolPosition string // "Before", "After", "Before with space" or "After with space"
+
+	WeekStartDay         time.Weekday
+	FiscalYearStartMonth int
+	FiscalYearStart      bool
+
+	HyperlinkBase        string
+	BaselineCalendarName string
+	ResourcePoolFile     string
+
+	// BaselineDates records when each baseline (0 = the primary baseline,
+	// 1-10) was last saved.
+	BaselineDates map[int]time.Time
 }

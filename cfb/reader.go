@@ -324,9 +324,13 @@ func parseDirEntry(b []byte) rawDirEntry {
 	}
 }
 
+// readRawSector reads one regular sector. Sector 0 starts one sector length
+// into the file: the header occupies the first 512 bytes, padded out to a
+// whole sector, so 4096-byte-sector (version 4) files begin their sectors
+// at 4096, not 512.
 func (f *File) readRawSector(id uint32) ([]byte, error) {
 	buf := make([]byte, f.sectorSize)
-	off := int64(headerSize) + int64(id)*int64(f.sectorSize)
+	off := (int64(id) + 1) * int64(f.sectorSize)
 	if _, err := f.r.ReadAt(buf, off); err != nil {
 		return nil, fmt.Errorf("cfb: reading sector %d: %w", id, err)
 	}
@@ -393,6 +397,12 @@ func (f *File) readMiniChain(startSect uint32, size uint64) ([]byte, error) {
 func (f *File) ReadStream(e *Entry) ([]byte, error) {
 	if !e.IsStream() {
 		return nil, fmt.Errorf("cfb: %q is not a stream", e.Name)
+	}
+	// An empty stream owns no sectors. Its start sector is meaningless
+	// (often 0 rather than ENDOFCHAIN), and size 0 tells the chain readers
+	// "no truncation", so following it would return another stream's data.
+	if e.Size == 0 {
+		return []byte{}, nil
 	}
 	if e.Size < uint64(f.miniCutoff) {
 		return f.readMiniChain(e.StartSect, e.Size)

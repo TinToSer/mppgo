@@ -37,7 +37,7 @@ type nativeTable struct {
 	meta      *FixedMeta
 	fixed     *FixedData
 	variable  *Var2Data
-	fieldMap  map[int]int
+	fieldMap  map[int]fieldLocation
 	uidOffset int
 }
 
@@ -146,7 +146,7 @@ func loadNativeTable(source *streamSource, props *Props, entity string) (*native
 	}
 	table.fixed = ParseFixedData(table.meta, table.fixedRaw, 512, 0)
 	table.fieldMap = loadFieldMap(props, mapKey1, mapKey2)
-	table.uidOffset = fieldOffset(table.fieldMap, base|uidField, uidDefault)
+	table.uidOffset = fieldOffset(table.fieldMap, base|uidField, 0, uidDefault)
 	return table, nil
 }
 
@@ -202,13 +202,14 @@ func (table *nativeTable) apply(edit NativeEdit, expected *project.File, aliases
 		if err != nil || number < 0 || number > 1000 || number != math.Trunc(number) {
 			return fmt.Errorf("priority must be an integer from 0 to 1000")
 		}
-		offset := fieldOffset(table.fieldMap, taskFieldBase|taskFieldIDPriority, taskDefaultOffsetPriority)
+		offset := fieldOffset(table.fieldMap, taskFieldBase|taskFieldIDPriority, 0, taskDefaultOffsetPriority)
 		record := table.fixed.ByteArrayValue(rowIndex)
 		if offset < 0 || offset+2 > len(record) {
 			return fmt.Errorf("priority field is absent from this record")
 		}
 		binary.LittleEndian.PutUint16(record[offset:], uint16(number))
 		entity.(*project.Task).Priority = int(number)
+		setDecodedField(entity, "Priority", int(number))
 		return nil
 	}
 	direct := map[string]struct {
@@ -237,6 +238,7 @@ func (table *nativeTable) apply(edit NativeEdit, expected *project.File, aliases
 			}
 			reflect.ValueOf(entity).Elem().FieldByName("RTFNotes").SetString(rtf)
 			text = stripRTF(rtf)
+			setDecodedField(entity, "Notes", text)
 		} else {
 			if field == "wbs" && text == "" {
 				return fmt.Errorf("cannot clear WBS: Project synthesizes it when absent")
@@ -244,6 +246,11 @@ func (table *nativeTable) apply(edit NativeEdit, expected *project.File, aliases
 			encoded = nativeUTF16(text)
 			if err := table.writeVariable(edit.UniqueID, descriptor.key, encoded); err != nil {
 				return err
+			}
+			if text == "" {
+				setDecodedField(entity, descriptor.name, nil)
+			} else {
+				setDecodedField(entity, descriptor.name, text)
 			}
 		}
 		reflect.ValueOf(entity).Elem().FieldByName(descriptor.name).SetString(text)
@@ -308,8 +315,10 @@ func (table *nativeTable) apply(edit NativeEdit, expected *project.File, aliases
 				}
 				if text == "" {
 					setCustom(name, nil)
+					setDecodedField(entity, fallback, nil)
 				} else {
 					setCustom(name, text)
+					setDecodedField(entity, fallback, text)
 				}
 			default:
 				number, err := nativeNumber(edit.Value)
@@ -329,6 +338,11 @@ func (table *nativeTable) apply(edit NativeEdit, expected *project.File, aliases
 					return err
 				}
 				setCustom(name, number)
+				decoded := number
+				if group.prefix == "Cost" {
+					decoded = customFieldCurrency(stored)
+				}
+				setDecodedField(entity, fallback, decoded)
 			}
 			return nil
 		}
@@ -401,4 +415,26 @@ func nativeNumber(value interface{}) (float64, error) {
 		return 0, fmt.Errorf("value must be a finite number")
 	}
 	return number, nil
+}
+
+// setDecodedField mirrors an edit into the entity's Fields map, which the
+// read-back comparison checks along with the typed fields. A nil value
+// removes the field, as the reader leaves out a field with no value.
+func setDecodedField(entity interface{}, name string, value interface{}) {
+	fields := reflect.ValueOf(entity).Elem().FieldByName("Fields")
+	if !fields.IsValid() {
+		return
+	}
+	if fields.IsNil() {
+		if value == nil {
+			return
+		}
+		fields.Set(reflect.ValueOf(map[string]interface{}{}))
+	}
+	m := fields.Interface().(map[string]interface{})
+	if value == nil {
+		delete(m, name)
+	} else {
+		m[name] = value
+	}
 }

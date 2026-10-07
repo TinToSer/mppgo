@@ -27,11 +27,8 @@ const (
 	outlineCodeMaxDepth = 64
 )
 
-// outlineCodeValue is one node of the shared outline-code value tree.
-type outlineCodeValue struct {
-	text     string
-	parentID int
-}
+// outlineCodeValue is one node of the shared value tree; see lookupValue.
+type outlineCodeValue = lookupValue
 
 // outlineCodeParentOffset returns the byte offset of a value's parent-ID
 // field within its FixedData record. Project 2013 and 2016+ share a
@@ -43,47 +40,84 @@ func outlineCodeParentOffset(applicationVersion int) int {
 	return 10
 }
 
+// lookupValueLayout returns the offsets, within a value's Fixed2Data
+// record, of its value-type code and of the GUID of the lookup table it
+// belongs to. The record starts with the value's own GUID.
+func lookupValueLayout(applicationVersion int) (typeOffset, tableOffset int) {
+	if applicationVersion <= appVersionProject2010 {
+		return 32, 16
+	}
+	return 16, 18
+}
+
+// Value-type codes of a lookup table value (MPXJ's CustomFieldValueDataType).
+const (
+	lookupTypeDate       = 4
+	lookupTypeDuration   = 6
+	lookupTypeCost       = 9
+	lookupTypeNumber     = 15
+	lookupTypeText       = 21
+	lookupTypeFinishDate = 27
+
+	lookupDescriptionVarType = 8
+)
+
 // readOutlineCodeValues reads the TBkndOutlCode storage: the single,
-// project-wide table backing every task and resource Outline Code field.
-// Returns an empty map (not an error) if the storage is absent — an older
-// or minimal file may not have one at all.
-func readOutlineCodeValues(src *streamSource, projectDirPath string, applicationVersion int) map[int]outlineCodeValue {
-	values := make(map[int]outlineCodeValue)
+// project-wide table holding every outline code value and every custom
+// field lookup table value, keyed by unique ID and by GUID. Returns empty
+// maps (not an error) if the storage is absent — an older or minimal file
+// may not have one at all.
+func readOutlineCodeValues(ctx *readContext, projectDirPath string) (map[int]lookupValue, map[string]lookupValue) {
+	values := make(map[int]lookupValue)
+	byGUID := make(map[string]lookupValue)
+	src := ctx.src
 
 	dir := projectDirPath + "/TBkndOutlCode"
 	if !src.has(dir + "/VarMeta") {
-		return values
+		return values, byGUID
 	}
 
 	varMetaRaw, err := src.plain(dir + "/VarMeta")
 	if err != nil {
-		return values
+		return values, byGUID
 	}
 	varMeta, err := ParseVarMeta(varMetaRaw)
 	if err != nil {
-		return values
+		return values, byGUID
 	}
 	var2Raw, err := src.plain(dir + "/Var2Data")
 	if err != nil {
-		return values
+		return values, byGUID
 	}
 	varData := ParseVar2Data(varMeta, var2Raw)
 
 	fixedMetaRaw, err := src.plain(dir + "/FixedMeta")
 	if err != nil {
-		return values
+		return values, byGUID
 	}
 	fixedMeta, err := ParseFixedMeta(fixedMetaRaw, 10)
 	if err != nil {
-		return values
+		return values, byGUID
 	}
 	fixedRaw, err := src.decoded(dir + "/FixedData")
 	if err != nil {
-		return values
+		return values, byGUID
 	}
-	fixedData := ParseFixedData(fixedMeta, fixedRaw, 512, 0)
+	fixedData := ParseFixedData(fixedMeta, fixedRaw, 0, 0)
 
-	parentOffset := outlineCodeParentOffset(applicationVersion)
+	// The second block carries each value's GUID, type and lookup table.
+	// It is optional: without it values still resolve, as text.
+	var fixed2 *FixedData
+	if raw, err := src.plain(dir + "/Fixed2Meta"); err == nil {
+		if meta2, err := ParseFixedMeta(raw, 10); err == nil {
+			if raw2, err := src.decoded(dir + "/Fixed2Data"); err == nil {
+				fixed2 = ParseFixedData(meta2, raw2, 0, 0)
+			}
+		}
+	}
+
+	parentOffset := outlineCodeParentOffset(ctx.version)
+	typeOffset, tableOffset := lookupValueLayout(ctx.version)
 
 	for i := 0; i < fixedData.ItemCount(); i++ {
 		rec := fixedData.ByteArrayValue(i)
@@ -94,17 +128,49 @@ func readOutlineCodeValues(src *streamSource, projectDirPath string, application
 		if id <= 0 {
 			continue
 		}
-		if !varData.Has(id, outlineCodeValueVarType) {
+		raw := varData.ByteArray(id, outlineCodeValueVarType)
+		if raw == nil {
 			continue
 		}
-
-		values[id] = outlineCodeValue{
-			text:     varData.UnicodeString(id, outlineCodeValueVarType),
-			parentID: getShort(rec, parentOffset),
+		v := lookupValue{
+			text:        getUnicodeString(raw, 0),
+			description: varData.UnicodeString(id, lookupDescriptionVarType),
+			parentID:    getShort(rec, parentOffset),
+		}
+		valueType := 0
+		if fixed2 != nil {
+			if rec2 := fixed2.ByteArrayValue(i); rec2 != nil {
+				v.guid = getGUID(rec2, 0)
+				v.tableGUID = getGUID(rec2, tableOffset)
+				valueType = getShort(rec2, typeOffset)
+			}
+		}
+		v.value = typedLookupValue(ctx, valueType, raw, v.text)
+		values[id] = v
+		if v.guid != "" {
+			byGUID[v.guid] = v
 		}
 	}
+	return values, byGUID
+}
 
-	return values
+// typedLookupValue decodes a lookup value's bytes by its value type,
+// falling back to text for a type this reader does not know.
+func typedLookupValue(ctx *readContext, valueType int, raw []byte, text string) interface{} {
+	switch valueType {
+	case lookupTypeDate, lookupTypeFinishDate:
+		if t, ok := getTimestamp(raw, 0); ok {
+			return t
+		}
+		return nil
+	case lookupTypeDuration:
+		return ctx.scale.duration(getInt(raw, 0), durationTimeUnits(getShort(raw, 4), ctx.defaultUnits))
+	case lookupTypeCost:
+		return getDouble(raw, 0) / 100
+	case lookupTypeNumber:
+		return getDouble(raw, 0)
+	}
+	return text
 }
 
 // resolveOutlineCodePath builds the full "parent | child | ..." path MS

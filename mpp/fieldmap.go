@@ -30,11 +30,18 @@ const (
 	fieldMapNoFixedDataOffset = 65535
 )
 
+// fieldLocation is where a field-map entry places a field: which fixed-data
+// block (0 = FixedData, 1 = Fixed2Data, ...) and the byte offset within it.
+type fieldLocation struct {
+	block  int
+	offset int
+}
+
 // loadFieldMap returns the parsed field-map blob for the given candidate
 // Props keys (the first one present wins, matching MS Project's own
 // fallback order), or nil if neither is present — callers then fall back
 // to the MPP14 defaults entirely.
-func loadFieldMap(projectProps *Props, key1, key2 int) map[int]int {
+func loadFieldMap(projectProps *Props, key1, key2 int) map[int]fieldLocation {
 	data := projectProps.ByteArray(key1)
 	if data == nil {
 		data = projectProps.ByteArray(key2)
@@ -45,32 +52,42 @@ func loadFieldMap(projectProps *Props, key1, key2 int) map[int]int {
 	return parseFieldMap(data)
 }
 
-// parseFieldMap decodes a field-map blob into a lookup from a field's full
-// class-prefixed ID to its byte offset within whichever fixed-data stream
-// it belongs to (a detail this reader already knows per field, so it is
-// not re-derived here). Entries located in var-data instead of fixed data
-// (offset == 65535) are skipped: this reader locates every var-data field
-// it needs directly by its (uniqueID, type) key.
-func parseFieldMap(data []byte) map[int]int {
-	offsets := make(map[int]int)
-	for idx := 0; idx+fieldMapRecordSize <= len(data); idx += fieldMapRecordSize {
-		dataBlockOffset := getShort(data, idx+4)
-		if dataBlockOffset == fieldMapNoFixedDataOffset {
-			continue
-		}
-		typeValue := getInt(data, idx+12)
-		offsets[typeValue] = dataBlockOffset
+// fieldMapData returns the raw field-map blob under the first of the two
+// Props keys that is present, or nil.
+func fieldMapData(projectProps *Props, key1, key2 int) []byte {
+	if data := projectProps.ByteArray(key1); data != nil {
+		return data
 	}
-	return offsets
+	return projectProps.ByteArray(key2)
 }
 
-// fieldOffset resolves the fixed-data byte offset for a field, preferring
-// the file's own field map over the supplied MPP14 default.
-func fieldOffset(fieldMap map[int]int, fullFieldID, defaultOffset int) int {
-	if fieldMap != nil {
-		if off, ok := fieldMap[fullFieldID]; ok {
-			return off
+// parseFieldMap decodes a field-map blob into a lookup from a field's full
+// class-prefixed ID to its fixed-data block and byte offset (see
+// parseFieldMapEntries for how blocks are told apart). Entries located in
+// var data or in the meta-data flags are left out: this reader locates
+// var-data fields directly by their (uniqueID, type) key.
+func parseFieldMap(data []byte) map[int]fieldLocation {
+	locations := make(map[int]fieldLocation)
+	for _, e := range parseFieldMapEntries(data) {
+		if e.location == fieldLocationFixed {
+			locations[e.fullID] = fieldLocation{block: e.block, offset: e.offset}
 		}
 	}
-	return defaultOffset
+	return locations
+}
+
+// fieldOffset resolves a field's byte offset within the given fixed-data
+// block, preferring the file's own field map over the supplied MPP14
+// default. When the file has a field map but it places the field anywhere
+// else — another block, or var data — the result is -1, which every
+// bounds-checked accessor reads as absent. Falling back to the default
+// offset in that case would read whatever unrelated field now occupies it.
+func fieldOffset(fieldMap map[int]fieldLocation, fullFieldID, block, defaultOffset int) int {
+	if fieldMap == nil {
+		return defaultOffset
+	}
+	if loc, ok := fieldMap[fullFieldID]; ok && loc.block == block {
+		return loc.offset
+	}
+	return -1
 }

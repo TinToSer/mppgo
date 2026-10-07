@@ -45,6 +45,8 @@ var taskCustomFields = buildCustomFieldDefs(
 	[]int{103, 104, 105, 275, 276, 277, 278, 279, 280, 281}, "Duration", kindDuration,
 	[]int{106, 107, 108, 258, 259, 260, 261, 262, 263, 264}, "Cost", kindCost,
 	[]int{72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301}, "Flag", kindFlag,
+	[]int{52, 55, 58, 61, 64, 282, 284, 286, 288, 290}, "Start", kindDate,
+	[]int{53, 56, 59, 62, 65, 283, 285, 287, 289, 291}, "Finish", kindDate,
 )
 
 var resourceCustomFields = buildCustomFieldDefs(
@@ -54,6 +56,19 @@ var resourceCustomFields = buildCustomFieldDefs(
 	[]int{117, 118, 119, 183, 184, 185, 186, 187, 188, 189}, "Duration", kindDuration,
 	[]int{123, 124, 125, 166, 167, 168, 169, 170, 171, 172}, "Cost", kindCost,
 	[]int{127, 128, 129, 130, 131, 132, 133, 134, 135, 126, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204}, "Flag", kindFlag,
+	[]int{102, 103, 104, 105, 106, 220, 221, 222, 223, 224}, "Start", kindDate,
+	[]int{107, 108, 109, 110, 111, 190, 191, 192, 193, 194}, "Finish", kindDate,
+)
+
+var assignmentCustomFields = buildCustomFieldDefs(
+	[]int{88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237}, "Text", kindText,
+	[]int{108, 109, 110, 111, 112, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212}, "Number", kindNumber,
+	[]int{166, 167, 168, 169, 170, 171, 172, 173, 174, 175}, "Date", kindDate,
+	[]int{113, 114, 115, 176, 177, 178, 179, 180, 181, 182}, "Duration", kindDuration,
+	[]int{119, 120, 121, 159, 160, 161, 162, 163, 164, 165}, "Cost", kindCost,
+	[]int{123, 124, 125, 126, 127, 128, 129, 130, 131, 122, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197}, "Flag", kindFlag,
+	[]int{98, 99, 100, 101, 102, 213, 214, 215, 216, 217}, "Start", kindDate,
+	[]int{103, 104, 105, 106, 107, 183, 184, 185, 186, 187}, "Finish", kindDate,
 )
 
 // buildCustomFieldDefs assembles a field-ID lookup from repeated
@@ -111,7 +126,7 @@ func applyExtendedAttribute(fields map[string]interface{}, defs map[int]customFi
 		v = n / 100 // custom Cost fields are stored in hundredths, unlike the plain decimal core Cost fields
 
 	case kindFlag:
-		if value != "1" {
+		if value != "1" && !strings.EqualFold(value, "true") {
 			return fields
 		}
 		v = true
