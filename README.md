@@ -1,6 +1,7 @@
 # mppgo
 
-A Go library for reading Microsoft Project files, written from scratch with
+A Go library for reading Microsoft Project files, exporting Project XML,
+and verified non-scheduling edits of native MPP templates, written with
 no external dependencies (standard library only).
 
 Modelled on [MPXJ](https://github.com/joniles/mpxj), the Java library that
@@ -14,27 +15,35 @@ MPP (binary) or MSPDI (XML) files, verified against real Project 2016/365
 files and, for MSPDI, against a hand-built document covering every area
 this reader supports (there is no reverse-engineering involved in MSPDI —
 see the `mspdi` package below — but also no real-world sample file to
-verify against, the way `mpp` has). Writing either format is not
-implemented.
+verify against, the way `mpp` has). MSPDI model export and constrained,
+byte-preserving native MPP template edits are implemented. This is not a
+general proprietary-format writer or a scheduling engine.
 
 | Area | MPP (binary) | MSPDI (XML) |
 | --- | --- | --- |
 | Project properties | Partial — title/metadata, file path, calendar, version, start/finish/status dates, scheduling factors | Partial — same core subset |
-| Calendars | Complete — working weeks, hours, exceptions, inheritance | Complete, except work weeks (a named, date-ranged weekly override distinct from a plain exception) |
+| Calendars | Weekly patterns, hours, exceptions and inheritance; named work weeks are not modelled | Weekly patterns, hours, exceptions and inheritance; named work weeks are not modelled |
 | Tasks | Core fields — hierarchy, WBS, all four date pairs, duration, slack, work, cost, constraint, type, flags | Core fields — hierarchy (derived from OutlineLevel), dates, duration, work, cost, constraint, type |
 | Resources | Core fields — name, initials, type, group, rate, max units, work, cost, calendar | Core fields — same subset |
 | Assignments | Core fields — task/resource links, units, work, start/finish | Core fields — same subset |
 | Task dependencies | Complete — predecessors/successors, relation type, lag | Complete |
 | Notes | Complete — RTF stripped to plain text (`Notes`), original kept as `RTFNotes` | Complete — MSPDI stores notes as plain text already, so `RTFNotes` is always empty |
 | Baselines | Complete — primary baseline plus Baseline1-10, for tasks, resources and assignments | Complete |
-| Custom fields | Complete — Text1-30, Number1-20, Date1-10, Duration1-10, Cost1-10, Flag1-20 and Outline Code1-10 (resolved to their full "parent \| child" path), with user-defined aliases resolved | Text/Number/Date/Duration/Cost/Flag only — Outline Code fields and alias names are not read |
-| Resource cost rate tables (A-E) | Complete | Not yet implemented |
-| Resource availability table | Complete | Not yet implemented |
-| Timephased data | Partial — planned/remaining work and baseline work/cost, day-by-day; actual/completed work (which requires splicing in a second "worked outside normal hours" data block) not yet implemented | Not yet implemented |
-| Write | Not yet implemented | Not yet implemented |
+| Custom fields | Text1-30, Number1-20, Date1-10, Duration1-10, Cost1-10, Flag1-20 and resolved Outline Code1-10 paths, with aliases | Text/Number/Date/Duration/Cost/Flag and aliases; full field IDs supported; outline/enterprise definitions remain unsupported |
+| Resource cost rate tables (A-E) | Supported | Supported |
+| Resource availability table | Supported | Supported |
+| Timephased data | Partial: planned/remaining work and baseline work/cost; actual work not decoded | Assignment remaining/actual/baseline work and baseline cost; raw assignment records, including unknown types, retained |
+| Write | Same-size verified template patches for advertised non-scheduling fields | Model-based schedule export; not a lossless source-document round trip |
 
 Scope is MPP14 (Project 2010 through 365) plus MSPDI. Legacy MPP8/9/12 and
 the non-Microsoft formats MPXJ supports are out of scope.
+
+Native patching supports 512-byte compound-file sectors with 64-byte mini
+sectors. Stored variable fields must already exist, fit their existing
+capacity and not be shared. Unknown bytes and the container layout are
+preserved. Every patch is reopened and compared against the full intended
+parsed model; Microsoft Project UI compatibility still requires validation
+in Microsoft Project.
 
 ## Install
 
@@ -100,12 +109,53 @@ if err != nil {
 // pf is a *project.File, identical in shape to what mpp.ReadFile returns.
 ```
 
+## Writing
+
+Export a parsed or newly constructed model as Project XML:
+
+```go
+err := mspdi.WriteFile("export.xml", pf)
+```
+
+`WriteFile` creates a new file and refuses existing destinations. `Write`
+accepts an `io.Writer`. XML export includes modelled properties, calendars,
+tasks, dependencies, resources, assignments, baselines, supported custom
+fields/aliases, resource tables and assignment timephased records. It does
+not retain unmodelled features, unknown XML elements, views, macros or RTF
+formatting. Unsupported custom-field definitions return an error rather
+than silently omitting values. Timephased totals are exported; per-hour
+rates may be rederived from the calendar. No schedule is recalculated.
+
+Native MPP patching returns bytes without changing the source file:
+
+```go
+original, err := os.ReadFile("plan.mpp")
+if err != nil {
+  return err
+}
+patched, err := mpp.Patch(original, []mpp.NativeEdit{
+  {Entity: "tasks", UniqueID: 123, Field: "priority", Value: 700},
+})
+```
+
+Use `mpp.NativeWritableFields()` for the exact editable surface. Task names,
+stored WBS, notes, priority, resource identity fields, existing Text/Number/
+Cost custom fields and Flag bits are supported. Aliases are preserved in
+`project.File.CustomFieldAliases`. Structural/scheduling edits, variable
+growth and shared records are rejected. Output publishing, root boundaries,
+revision/hash checks and backups belong to the calling application.
+
+For raw inspection, `mpp.ReadRawStream` optionally removes known XOR
+obfuscation; `Props.Keys()` and `VarMeta.UniqueIDs()` enumerate stored keys
+and entities, including data outside the typed model. Unknown types remain
+opaque rather than being guessed.
+
 ## Packages
 
-- `cfb` — Compound File Binary (OLE2) container reader. Generic MS-CFB, not
+- `cfb` — Compound File Binary (OLE2) container reader and same-size stream patcher. Generic MS-CFB, not
   Project-specific.
-- `mpp` — MPP14 reader: binary block primitives and entity readers.
-- `mspdi` — MSPDI (Project XML) reader, targeting the same `project.File`
+- `mpp` — MPP14 reader, raw inspection and verified native template edits.
+- `mspdi` — MSPDI (Project XML) reader and model writer, targeting the same `project.File`
   model as `mpp`.
 - `project` — format-agnostic data model that readers and writers target.
 - `cmd/inspect` — dump a compound file's storage/stream tree.

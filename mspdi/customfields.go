@@ -85,6 +85,7 @@ func applyExtendedAttribute(fields map[string]interface{}, defs map[int]customFi
 	if err != nil {
 		return fields
 	}
+	id &= 0xFFFF
 	def, ok := defs[id]
 	if !ok {
 		return fields

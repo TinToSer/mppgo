@@ -5,6 +5,15 @@ package project
 
 import "time"
 
+type TimephasedData struct {
+	Type   int
+	UID    int
+	Start  time.Time
+	Finish time.Time
+	Unit   int
+	Value  string
+}
+
 // TimephasedWork is one span of an assignment's work spread across time —
 // MS Project's "Task Usage"/"Resource Usage" view, one column per day (or
 // week/month, depending on the view's timescale). PerHour is the rate MS

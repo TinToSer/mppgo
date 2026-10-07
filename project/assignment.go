@@ -47,6 +47,8 @@ type Assignment struct {
 	// Baselines is not guaranteed to also be present here, or vice versa —
 	// each comes from its own data in the file.
 	TimephasedWork         []TimephasedWork
+	TimephasedActualWork   []TimephasedWork
 	TimephasedBaselineWork map[int][]TimephasedWork
 	TimephasedBaselineCost map[int][]TimephasedCost
+	RawTimephased          []TimephasedData
 }

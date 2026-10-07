@@ -27,26 +27,28 @@ import (
 )
 
 type xmlProjectRoot struct {
-	XMLName        xml.Name        `xml:"Project"`
-	Name           string          `xml:"Name"`
-	Title          string          `xml:"Title"`
-	Subject        string          `xml:"Subject"`
-	Category       string          `xml:"Category"`
-	Company        string          `xml:"Company"`
-	Manager        string          `xml:"Manager"`
-	Author         string          `xml:"Author"`
-	StartDate      xmlDateTime     `xml:"StartDate"`
-	FinishDate     xmlDateTime     `xml:"FinishDate"`
-	StatusDate     xmlDateTime     `xml:"StatusDate"`
-	CalendarUID    *int            `xml:"CalendarUID"`
-	MinutesPerDay  int             `xml:"MinutesPerDay"`
-	MinutesPerWeek int             `xml:"MinutesPerWeek"`
-	DaysPerMonth   int             `xml:"DaysPerMonth"`
-	DurationFormat *int            `xml:"DurationFormat"`
-	Calendars      *xmlCalendars   `xml:"Calendars"`
-	Tasks          *xmlTasks       `xml:"Tasks"`
-	Resources      *xmlResources   `xml:"Resources"`
-	Assignments    *xmlAssignments `xml:"Assignments"`
+	XMLName            xml.Name                      `xml:"Project"`
+	XMLNS              string                        `xml:"xmlns,attr,omitempty"`
+	Name               string                        `xml:"Name"`
+	Title              string                        `xml:"Title"`
+	Subject            string                        `xml:"Subject"`
+	Category           string                        `xml:"Category"`
+	Company            string                        `xml:"Company"`
+	Manager            string                        `xml:"Manager"`
+	Author             string                        `xml:"Author"`
+	StartDate          xmlDateTime                   `xml:"StartDate"`
+	FinishDate         xmlDateTime                   `xml:"FinishDate"`
+	StatusDate         xmlDateTime                   `xml:"StatusDate"`
+	CalendarUID        *int                          `xml:"CalendarUID"`
+	MinutesPerDay      int                           `xml:"MinutesPerDay"`
+	MinutesPerWeek     int                           `xml:"MinutesPerWeek"`
+	DaysPerMonth       int                           `xml:"DaysPerMonth"`
+	DurationFormat     *int                          `xml:"DurationFormat"`
+	ExtendedAttributes *xmlProjectExtendedAttributes `xml:"ExtendedAttributes"`
+	Calendars          *xmlCalendars                 `xml:"Calendars"`
+	Tasks              *xmlTasks                     `xml:"Tasks"`
+	Resources          *xmlResources                 `xml:"Resources"`
+	Assignments        *xmlAssignments               `xml:"Assignments"`
 }
 
 // ReadFile opens and parses an MSPDI (Project XML) file from disk.
@@ -118,6 +120,8 @@ func Read(r io.Reader) (*project.File, error) {
 	for _, a := range readAssignments(root.Assignments, scale) {
 		pf.AddAssignment(a)
 	}
+	readTimephased(pf, root.Assignments, scale)
+	readAliases(pf, root.ExtendedAttributes)
 
 	return pf, nil
 }

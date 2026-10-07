@@ -16,6 +16,8 @@ type xmlCalendars struct {
 type xmlCalendar struct {
 	UID             int            `xml:"UID"`
 	Name            string         `xml:"Name"`
+	GUID            string         `xml:"GUID,omitempty"`
+	IsBaseCalendar  bool           `xml:"IsBaseCalendar"`
 	BaseCalendarUID *int           `xml:"BaseCalendarUID"`
 	WeekDays        *xmlWeekDays   `xml:"WeekDays"`
 	Exceptions      *xmlExceptions `xml:"Exceptions"`
@@ -76,6 +78,7 @@ func readCalendars(xc *xmlCalendars) []*project.Calendar {
 		c := project.NewCalendar()
 		c.UniqueID = x.UID
 		c.Name = x.Name
+		c.GUID = x.GUID
 
 		if x.WeekDays != nil {
 			for _, wd := range x.WeekDays.WeekDay {

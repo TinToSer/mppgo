@@ -174,6 +174,7 @@ func Read(r io.ReaderAt) (*project.File, error) {
 	}
 
 	aliases := readCustomFieldAliases(src, projectDirPath)
+	pf.CustomFieldAliases = map[int]string(aliases)
 	outlineCodeValues := readOutlineCodeValues(src, projectDirPath, compObj.ApplicationVersion)
 
 	resources, err := readResources(src, projectDirPath, projectProps, compObj.ApplicationVersion, scale, defaultDurationUnits, aliases, outlineCodeValues)

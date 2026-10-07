@@ -6,6 +6,7 @@ package mpp
 import (
 	"strconv"
 	"strings"
+	"unicode/utf16"
 )
 
 // MS Project stores task and resource notes as RTF, even when the user
@@ -167,7 +168,12 @@ func stripRTF(text string) string {
 							cp += 65536
 						}
 						if !cur.skip {
-							out = append(out, rune(cp))
+							codepoint := rune(cp)
+							if len(out) > 0 && out[len(out)-1] >= 0xD800 && out[len(out)-1] <= 0xDBFF && codepoint >= 0xDC00 && codepoint <= 0xDFFF {
+								out[len(out)-1] = utf16.DecodeRune(out[len(out)-1], codepoint)
+							} else {
+								out = append(out, codepoint)
+							}
 						}
 						pendingSkip = cur.ucSkip
 					}

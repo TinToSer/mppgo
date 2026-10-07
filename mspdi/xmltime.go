@@ -5,6 +5,7 @@ package mspdi
 
 import (
 	"encoding/xml"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,13 @@ func (d *xmlDateTime) UnmarshalXML(dec *xml.Decoder, start xml.StartElement) err
 	return nil
 }
 
+func (date xmlDateTime) MarshalXML(encoder *xml.Encoder, start xml.StartElement) error {
+	if !date.Valid || date.Time.IsZero() {
+		return nil
+	}
+	return encoder.EncodeElement(date.Time.Format("2006-01-02T15:04:05"), start)
+}
+
 // parseMSPDIDateTime parses an xsd:dateTime string using every layout MSPDI
 // is known to write (see mspdiDateTimeLayouts), reporting ok=false rather
 // than an error for anything empty or unrecognised.
@@ -63,6 +71,15 @@ func parseMSPDIDateTime(s string) (time.Time, bool) {
 type xmlTime struct {
 	Offset time.Duration
 	Valid  bool
+}
+
+func (clock xmlTime) MarshalXML(encoder *xml.Encoder, start xml.StartElement) error {
+	if !clock.Valid {
+		return nil
+	}
+	seconds := int64(clock.Offset / time.Second)
+	text := fmt.Sprintf("%02d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
+	return encoder.EncodeElement(text, start)
 }
 
 func (t *xmlTime) UnmarshalXML(dec *xml.Decoder, start xml.StartElement) error {

@@ -3,7 +3,10 @@
 
 package mpp
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // Props is a decoded "Props"/"Props14" property-set stream: an integer key
 // to raw-byte-value map, with typed accessors.
@@ -49,6 +52,15 @@ func ParseProps14(data []byte) *Props {
 }
 
 func (p *Props) ByteArray(key int) []byte { return p.values[key] }
+
+func (p *Props) Keys() []int {
+	keys := make([]int, 0, len(p.values))
+	for key := range p.values {
+		keys = append(keys, key)
+	}
+	sort.Ints(keys)
+	return keys
+}
 
 func (p *Props) Byte(key int) int {
 	v := p.values[key]

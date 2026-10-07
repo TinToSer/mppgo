@@ -19,6 +19,7 @@ type xmlAssignment struct {
 	Finish      xmlDateTime             `xml:"Finish"`
 	Notes       string                  `xml:"Notes"`
 	Baseline    []xmlAssignmentBaseline `xml:"Baseline"`
+	Timephased  []xmlTimephasedData     `xml:"TimephasedData"`
 }
 
 type xmlAssignmentBaseline struct {

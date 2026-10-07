@@ -223,14 +223,22 @@ func (s durationScale) minutesPerUnit(u project.TimeUnit) float64 {
 		return 1
 	case project.Hours, project.ElapsedHours:
 		return 60
-	case project.Days, project.ElapsedDays:
+	case project.Days:
 		return s.minutesPerDay
-	case project.Weeks, project.ElapsedWeeks:
+	case project.ElapsedDays:
+		return 24 * 60
+	case project.Weeks:
 		return s.minutesPerWeek
-	case project.Months, project.ElapsedMonths:
+	case project.ElapsedWeeks:
+		return 7 * 24 * 60
+	case project.Months:
 		return s.minutesPerDay * s.daysPerMonth
-	case project.Years, project.ElapsedYears:
+	case project.ElapsedMonths:
+		return 30 * 24 * 60
+	case project.Years:
 		return s.minutesPerWeek * 52
+	case project.ElapsedYears:
+		return 365 * 24 * 60
 	default:
 		return 1
 	}

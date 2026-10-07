@@ -10,31 +10,35 @@ type xmlResources struct {
 }
 
 type xmlResource struct {
-	UID               int                    `xml:"UID"`
-	ID                int                    `xml:"ID"`
-	Name              string                 `xml:"Name"`
-	Type              int                    `xml:"Type"`
-	IsCostResource    bool                   `xml:"IsCostResource"`
-	Initials          string                 `xml:"Initials"`
-	Code              string                 `xml:"Code"`
-	Group             string                 `xml:"Group"`
-	EmailAddress      string                 `xml:"EmailAddress"`
-	MaxUnits          float64                `xml:"MaxUnits"`
-	StandardRate      float64                `xml:"StandardRate"`
-	OvertimeRate      float64                `xml:"OvertimeRate"`
-	CostPerUse        float64                `xml:"CostPerUse"`
-	Cost              float64                `xml:"Cost"`
-	Work              string                 `xml:"Work"`
-	CalendarUID       *int                   `xml:"CalendarUID"`
-	Notes             string                 `xml:"Notes"`
-	ExtendedAttribute []xmlExtendedAttribute `xml:"ExtendedAttribute"`
-	Baseline          []xmlResourceBaseline  `xml:"Baseline"`
+	UID               int                     `xml:"UID"`
+	ID                int                     `xml:"ID"`
+	Name              string                  `xml:"Name"`
+	Type              int                     `xml:"Type"`
+	IsCostResource    bool                    `xml:"IsCostResource"`
+	Initials          string                  `xml:"Initials"`
+	Code              string                  `xml:"Code"`
+	Group             string                  `xml:"Group"`
+	EmailAddress      string                  `xml:"EmailAddress"`
+	MaxUnits          float64                 `xml:"MaxUnits"`
+	StandardRate      float64                 `xml:"StandardRate"`
+	OvertimeRate      float64                 `xml:"OvertimeRate"`
+	CostPerUse        float64                 `xml:"CostPerUse"`
+	Cost              float64                 `xml:"Cost"`
+	Work              string                  `xml:"Work"`
+	CalendarUID       *int                    `xml:"CalendarUID"`
+	Notes             string                  `xml:"Notes"`
+	ExtendedAttribute []xmlExtendedAttribute  `xml:"ExtendedAttribute"`
+	Baseline          []xmlResourceBaseline   `xml:"Baseline"`
+	Rates             *xmlRates               `xml:"Rates"`
+	Availability      *xmlAvailabilityPeriods `xml:"AvailabilityPeriods"`
 }
 
 type xmlResourceBaseline struct {
-	Number int     `xml:"Number"`
-	Work   string  `xml:"Work"`
-	Cost   float64 `xml:"Cost"`
+	Number int         `xml:"Number"`
+	Start  xmlDateTime `xml:"Start"`
+	Finish xmlDateTime `xml:"Finish"`
+	Work   string      `xml:"Work"`
+	Cost   float64     `xml:"Cost"`
 }
 
 // resourceType decides between MS Project's three resource kinds. The
@@ -85,6 +89,12 @@ func readResources(xr *xmlResources, scale durationScale, defaultUnits project.T
 
 		for _, b := range x.Baseline {
 			bl := &project.Baseline{Cost: b.Cost}
+			if b.Start.Valid {
+				bl.Start = b.Start.Time
+			}
+			if b.Finish.Valid {
+				bl.Finish = b.Finish.Time
+			}
 			if w, ok := parseDuration(scale, b.Work, project.Hours); ok {
 				bl.Work = w
 			}
@@ -101,6 +111,7 @@ func readResources(xr *xmlResources, scale durationScale, defaultUnits project.T
 		for _, attr := range x.ExtendedAttribute {
 			r.CustomFields = applyExtendedAttribute(r.CustomFields, resourceCustomFields, scale, defaultUnits, attr.FieldID, attr.Value, attr.DurationFormat)
 		}
+		readResourceTables(r, x)
 
 		resources = append(resources, r)
 	}

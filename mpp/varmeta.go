@@ -97,6 +97,15 @@ func (m *VarMeta) Types(id int) []int {
 	return result
 }
 
+func (m *VarMeta) UniqueIDs() []int {
+	ids := make([]int, 0, len(m.table))
+	for id := range m.table {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	return ids
+}
+
 // Offsets returns all item offsets in ascending order (may contain duplicates
 // where entries share deduplicated var data).
 func (m *VarMeta) Offsets() []int { return m.offsets }

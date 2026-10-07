@@ -19,6 +19,8 @@ type File struct {
 	// are also reachable per-task through Task.Predecessors/Successors.
 	Relations []*Relation
 
+	CustomFieldAliases map[int]string
+
 	// DefaultCalendar is the project's default calendar, if it could be
 	// identified.
 	DefaultCalendar *Calendar
